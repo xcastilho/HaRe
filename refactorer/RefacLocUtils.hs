@@ -298,7 +298,7 @@ addLocInfo (decl, toks)
                                else if name=="Prelude.(,)" || name == "(,)" || name == "()"  then "(" 
                                                                                              else name   ----Check this again. 
                     toks' = dropWhile (\t->tokenCon t /= name') toks
-                    (row, col) =if toks'==[] then error ("HaRe: Error in addLocInfo while looking for" ++ name' ++ " !")  
+                    (row, col) =if toks'==[] then error "HaRe: Error in addLocInfo!"  
                                               else tokenPos $ ghead "findLoc" toks' 
                 return (SrcLoc "unknown" 0 row col)
 
@@ -415,10 +415,10 @@ replaceToks::[PosToken]->SimpPos->SimpPos->[PosToken]->[PosToken]
 replaceToks toks startPos endPos newToks
    = if toks22 == [] 
         then toks1 ++ newToks
-        else let {-(pos::(Int,Int)) = tokenPos (ghead "replaceToks" toks22)-} -- JULIEN
-                 oldOffset = {-getOffset toks pos  -}  lengthOfLastLine (toks1++toks21) --JULIEN
-                 newOffset = {-getOffset (toks1++newToks++ toks22) pos -} lengthOfLastLine (toks1++newToks) -- JULIEN
-             in  toks1++ (newToks++ adjustLayout toks22 oldOffset newOffset)
+        else let pos = tokenPos (ghead "replaceToks" toks22)
+                 oldOffset = getOffset toks pos       
+                 newOffset = getOffset (toks1++newToks++ toks22) pos 
+             in  toks1++ newToks++ adjustLayout toks22 oldOffset newOffset
    where 
       (toks1, toks21, toks22) = splitToks (startPos, endPos) toks
 
@@ -672,14 +672,14 @@ instance StartEndLoc HsExpP where
         HsId ident@(HsVar (PNT pn _ _)) ->let (startLoc, endLoc) = startEndLoc toks ident
                                               {- To handle infix operator. for infix operators like (++), there
                                                   is no parenthesis in the syntax tree -}
-                                             {-  (toks1,toks2) = break (\t->tokenPos t==startLoc) toks
+                                              (toks1,toks2) = break (\t->tokenPos t==startLoc) toks
                                               toks1' = dropWhile isWhite (reverse toks1)
                                               toks2' = dropWhile isWhite (gtail "startEndLoc:HsExpP"
-                                                          (dropWhile (\t->tokenPos t /=endLoc) toks2)) -}
-                                           in  {-if toks1'/=[] && toks2'/=[] && isOpenBracket (head toks1')
+                                                          (dropWhile (\t->tokenPos t /=endLoc) toks2))
+                                           in if toks1'/=[] && toks2'/=[] && isOpenBracket (head toks1')
                                                  && isCloseBracket (head toks2')
                                               then (tokenPos (head toks1'), tokenPos (head toks2'))
-                                              else-}  (startLoc, endLoc) 
+                                              else (startLoc, endLoc) 
         HsId  x                       ->startEndLoc toks x
    
         HsLit (SrcLoc _ _ r c) _      -> ((r,c),(r,c))

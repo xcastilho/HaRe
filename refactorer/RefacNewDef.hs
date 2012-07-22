@@ -65,10 +65,10 @@ introNewDef args
                     =doIntroduce' alt  rhsIn replaceRhs  
            inAlt _=mzero
       
-                 -- The sub-expression is in the stmts of a 'let'    
+           -- The sub-expression is in the stmts of a 'let'    
            inStmt (stmt@(HsLetStmt ds stmts):: HsStmtP)
                 | inRegion stmts tokList beginPos endPos &&  locToExp beginPos endPos tokList stmts /= defaultExp
-                     =doIntroduce'' stmt  stmtsIn replaceStmtsInDo  
+                     =doIntroduce' stmt  stmtsIn replaceStmtsInDo  
            inStmt  _=mzero
 
            failure=idTP `adhocTP` mod
@@ -354,8 +354,19 @@ unfoldDef args
        
      --a pattern binding is a complex if the pattern is not a single variable.
     isComplexPatBind decl=case decl of
-                   Dec (HsPatBind _ p _ _)->patToPN p ==defaultPN
+                   Dec (HsPatBind _ p _ _)->patToPN2 p ==defaultPN
                    _ ->False
+
+    patToPNT2::HsPatP->PNT
+    patToPNT2 (Pat (HsPId (HsVar pnt)))= pnt
+    patToPNT2 (Pat (HsPLit l (HsInt v))) = patToPNT2 (Pat (HsPId (HsVar (PNT (PN (UnQual (show v)) (S l)) Value (N (Just l))))) )
+    patToPNT2 (Pat (HsPParen p))=patToPNT2 p
+    patToPNT2 _=defaultPNT
+
+    -- | If a pattern consists of only one identifier then returns this identifier in the PName format,
+    --   otherwise returns the default PName.
+    patToPN2::HsPatP->PName
+    patToPN2=pNTtoPN.patToPNT2
 
     replacePatCallByExp pnt decl
      =applyTP (full_buTP (idTP `adhocTP` worker))

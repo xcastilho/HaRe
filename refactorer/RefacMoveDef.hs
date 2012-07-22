@@ -478,13 +478,18 @@ addParamsToParentAndLiftedDecl pn dd parent liftedDecls
        (lf,_)<-hsFreeAndDeclaredPNs liftedDecls   
        let newParams=((nub lf)\\ (nub ef)) \\ dd  --parameters (in PName format) to be added to pn because of lifting
        if newParams/=[]  
-         then if  (any isComplexPatBind liftedDecls)
+         then if  (any isComplexPatBind' liftedDecls)
                 then error "This pattern binding cannot be lifted, as it uses some other local bindings!"
                 else do parent'<-{-addParamsToDecls parent pn newParams True-} addParamsToParent pn newParams parent
                         liftedDecls'<-addParamsToDecls liftedDecls pn newParams True 
                         return (parent', liftedDecls',True)
          else return (parent,liftedDecls,False)
 
+isComplexPatBind' (Dec (HsPatBind _ p _ _)) = isPatID p
+isComplexPatBind' d = False
+
+isPatID (Pat (HsPId (HsVar pnt))) = False
+isPatID p = True
 --------------------------------End of Lifting-----------------------------------------
 
 {-Refactoring : demote a function/pattern binding(simpe or complex) to the declaration where it is used.
@@ -655,7 +660,7 @@ doDemoting' t pn
                  dupInMatch _ =mzero
      
                  dupInPat (pat@(Dec (HsPatBind loc p rhs ds))::HsDeclP)
-                    |any (flip findPN pat) pns && not (any (flip findPN p) pns)
+                    |any (flip findPN pat) pns && not (any (flip findPN pat) pns)
                    =  moveDecl pns pat False decls False
                  dupInPat _ =mzero  
               

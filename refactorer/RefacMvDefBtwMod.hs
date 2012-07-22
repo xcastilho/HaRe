@@ -1,14 +1,12 @@
 
 
-module RefacMvDefBtwMod(moveDefBtwMod, addImport) where
+module RefacMvDefBtwMod(moveDefBtwMod) where
 
 import Maybe
 import List 
 import RefacUtils  hiding (getQualifier)
 import PFE0 (findFile)
 import PrettyPrint
-import Debug.Trace
-import Data.List ((\\))
 
 {-This refactoring moves a user-selected function definition/pattern binding from current module to a
   user specified module.
@@ -223,7 +221,7 @@ addImport destFileName destModName pns mod@(HsModule _ _  _ imp _)
     else if itemsAreExplicitlyImported destModName mod  --Is the module imported and some of its items are explicitly imported?
           then addVarItemInImport1 destModName pns mod -- Yes. Then add the definition name to the list.
           else addImportDecl mod (modNameToStr destModName) False  Nothing False (map pNtoName pns)
-               -- mod (mkImportDecl destFileName destModName  False (map pNtoName pns)) --Create a new import decl.
+               --addImportDecl mod (mkImportDecl destFileName destModName  False (map pNtoName pns)) --Create a new import decl.
 
   where  
    {- Compose a import declaration which imports the module specified by 'modName',
@@ -259,10 +257,7 @@ addVarItemInImport1 serverModName pns mod
      =  {-do let ents'= map (\pn->Var (pNtoPNT pn Value)) pns 
            addItemsToImport1 imp ents'          
            return (HsImportDecl loc (SN modName l) qual as (Just (b, (ents'++ents)))) -}
-          let pns' = trace (show $ (pns, (map remVarPNT ents) )) (pns \\ (map remVarPNT ents))
-              remVarPNT (Var x) = nameToPN (pNTtoName x)
-          in
-             addItemsToImport serverModName  Nothing (Left (map pNtoName pns')) imp
+          addItemsToImport serverModName  Nothing (Left (map pNtoName pns)) imp
     inImport x = mzero
 
 --same name but with different meaning is used.

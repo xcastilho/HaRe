@@ -59,6 +59,7 @@ letToWhere args
       -- f <-  MT.lift $ getCurrentDirectory 
       modName <- fileNameToModName fileName 
       (inscps, _, mod, toks) <- parseSourceFile fileName  
+      
       let pnt = locToPNT fileName (row, col) mod                                         
           pn = pNTtoPN pnt
       if pn /= defaultPN
@@ -117,7 +118,7 @@ liftToWhere modName fileName (inscps, mod, toks) pnt@(PNT pn _ _)
    where
     liftWhereLevel =
        runStateT (applyTP ((once_tdTP (failTP `adhocTP` liftToWhere'
-                                                            `adhocTP` liftToWhere'
+                                                            `adhocTP` liftToWhere2
                                                             ))
                                           `choiceTP` failure) mod) ((toks,unmodified),(-1000,0))            
          where
@@ -125,6 +126,11 @@ liftToWhere modName fileName (inscps, mod, toks) pnt@(PNT pn _ _)
              | definingDecls [pn] (hsDecls rhs) False  False /=[] 
                   =doLifting2 pat  pn 
            liftToWhere' _=mzero
+           
+           liftToWhere2 (match@(HsMatch loc1 name pats rhs ds)::HsMatchP)
+            | definingDecls [pn] (hsDecls rhs) False  False /=[] 
+                  =doLifting3 match  pn 
+           liftToWhere2 _=mzero
                         
            doLifting2 dest@(Dec (HsPatBind loc p parent ds)) pn 
                = do  let  liftedDecls=definingDecls [pn] (hsDecls parent) True  False
@@ -136,7 +142,18 @@ liftToWhere modName fileName (inscps, mod, toks) pnt@(PNT pn _ _)
                                let liftedDecls''=if paramAdded then filter isFunOrPatBind liftedDecls'
                                                                 else liftedDecls'
                                moveDecl1 (Dec (HsPatBind loc p parent' ds)) Nothing [pn] False 
-                         else askRenamingMsg pns "lifting"          
+                         else askRenamingMsg pns "lifting"  
+           doLifting3 (match@(HsMatch loc1 name pats parent ds)::HsMatchP) pn 
+               = do  let  liftedDecls=definingDecls [pn] (hsDecls parent) True  False
+                          declaredPns=nub $ concatMap definedPNs liftedDecls
+                     pns<-pnsNeedRenaming inscps match parent liftedDecls declaredPns
+                     (_, dd)<-hsFreeAndDeclaredPNs match 
+                     if pns==[]
+                       then do (parent',liftedDecls',paramAdded)<-addParamsToDef pn dd parent liftedDecls
+                               let liftedDecls''=if paramAdded then filter isFunOrPatBind liftedDecls'
+                                                                else liftedDecls'
+                               moveDecl1 (HsMatch loc1 name pats parent' ds) Nothing [pn] False 
+                         else askRenamingMsg pns "lifting"        
                         
            worker dest ds pn
                   =do let (before, parent,after)=divideDecls ds pnt                                    

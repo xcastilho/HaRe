@@ -58,11 +58,11 @@ module RefacUtils(module Control.Monad.State, module StrategyLib, module RefacTy
     ,fileNameToModName, strToModName, modNameToStr, newProj, addFile, chase
 
     -- ** Locations
-    ,defineLoc, useLoc,locToPNT,locToPN,locToExp, locToExp2, locToPat, locToPatBind, locToLocalPat, getStartEndLoc , isLocalPNT
+    ,defineLoc, useLoc,locToPNT,locToPN,locToExp, locToExp2, locToPat, locToLocalPat, getStartEndLoc , isLocalPNT
 
  -- * Program transformation 
     -- ** Adding
-    ,addDecl, addDeclInMod ,addItemsToImport, addHiding, rmItemsFromImport, addItemsToExport, addTypeSigDecl
+    ,addDecl ,addItemsToImport, addHiding, rmItemsFromImport, addItemsToExport, addTypeSigDecl
     ,addParamsToDecls, addGuardsToRhs, addImportDecl, duplicateDecl, moveDecl
     -- ** Rmoving
     ,rmDecl, rmTypeSig, commentOutTypeSig, insertComment, extractComment, insertTerm, rmParams
@@ -136,7 +136,7 @@ import LocalSettings
 import StrategyLib hiding (findFile, fail, (>>=), (>>), return, mfix, Monad, Functor, MonadFix, MonadPlus, fmap, (=<<),
                            sequence_, sequence, mapM_, mapM, liftM5, liftM4, liftM3, mzero, mplus, guard, filterM, msum,
                            join, mapAndUnzipM, zipWithM, zipWithM_, foldM, when, unless, liftM, liftM2, ap, MonadTrans, MonadIO,
-                           fix, lift, liftIO, StateT, runStateT, State, runState )
+                           fix, lift, liftIO, StateT, runStateT, State )
 import Control.Monad.State
 import TypeCheck
 
@@ -746,7 +746,7 @@ addImportDecl mod@(HsModule _ _ _ imp decls) moduleName qualify alias hide idNam
                         else getOffset toks
                                 $ if imps'/=[] then fst $ startEndLoc toks  (ghead "addImportDecl1" imps') 
                                                else fst $ startEndLoc toks  (ghead "addImportDecl1" decls)
-           impToks =tokenise (Pos 0 v1 1) {-(colOffset-1)-} colOffset True 
+           impToks =tokenise (Pos 0 v1 1) (colOffset-1) True 
                       $ before++(render.ppi) impDecl++"\n" ++ after  --- refactorer this
        (impDecl', _) <- addLocInfo (impDecl,impToks)
        let toks' = toks1++impToks++toks2
@@ -803,7 +803,7 @@ addDecl parent pn (decl, declToks) topLevel
              (toks1, toks2) = if loc1==simpPos0  then (toks, [])
                                  else break (\t->tokenPos t==loc1) toks
              declStr = case declToks of 
-                        Just ts ->  concatMap tokenCon (skipWhites ts) ++"\n" -- JULIEN
+                        Just ts -> concatMap tokenCon ts ++"\n"
                         Nothing -> prettyprint decl++"\n\n"
              colOffset = if decls ==[] then 1 else getOffset toks $ fst (getStartEndLoc toks (head decls))
              newToks = tokenise (Pos 0 v1 1) colOffset True declStr
@@ -813,7 +813,7 @@ addDecl parent pn (decl, declToks) topLevel
          -- error "after"                                   
          return (replaceDecls parent (decls1++decl++decls2))
 
-appendDecl parent pn (decl, declToks)
+  appendDecl parent pn (decl, declToks)
     = do ((toks,_),(v1, v2))<-get   
          -- error (show parent ++ "----" ++ show pn ++ "-----" ++ show (decl, declToks))
          let (startPos,endPos) = startEndLocIncFowComment toks (ghead "appendDecl1" after) 
@@ -841,7 +841,7 @@ appendDecl parent pn (decl, declToks)
              in (reverse ts12, reverse ts11++ts2, ts3)      
 
   -- This function need to be tested.
-addLocalDecl parent (newFun, newFunToks)
+  addLocalDecl parent (newFun, newFunToks)
     =do
         ((toks,_), (v1, v2))<-get  
         let (startPos@(_,startCol),endPos'@(endRow',_))  --endPos' does not include the following newline or comment.
@@ -873,7 +873,7 @@ addLocalDecl parent (newFun, newFunToks)
         
          newSource  = if localDecls == []
                       then "where\n"++ concatMap (\l-> "  "++l++"\n") (lines newFun')
-                      else newFun' ++ "\n"
+                      else newFun'
             where
             offset1 = case newFunToks of 
                         Just ts -> lengthOfToks (takeWhile  isWhiteSpace  ts)   
@@ -881,90 +881,10 @@ addLocalDecl parent (newFun, newFunToks)
             newFun' = case newFunToks of 
                            Just ts ->let offset = lengthOfToks (takeWhile isWhiteSpace ts) 
                                      in concatMap tokenCon (removeOffset offset ts) 
-                           Nothing -> (prettyprint newFun) ++ "\n" 
+                           Nothing -> prettyprint newFun 
             removeOffset offset toks 
                 = let groupedToks = groupTokensByLine toks
                   in  concatMap  (doRmWhites offset) groupedToks
-
-
-
--- Added by Julien, small variation on addDecl.
--- In this version, parent is a module (HsModuleI ...).
--- This allows to know the layout for "import" clauses, 
--- when there are no declarations in the module 
--- (which is not possible with the polymorphic version addDecl).
--- Used in RefacMvDefBtwMod.
-addDeclInMod parent pn (decl, declToks) topLevel  
- = if isJust pn 
-     then appendDecl parent (fromJust pn) (decl, declToks)
-     else if topLevel 
-            then addTopLevelDecl (decl, declToks) parent
-            else addLocalDecl parent (decl,declToks)
- where
-
-  {- Add a definition to the beginning of the definition declaration list, but after the data type declarations
-     if there is any. The definition will be pretty-printed if its token stream is not provided. -}
-  addTopLevelDecl (decl, declToks) parent 
-    = do let decls = hsDecls parent 
-             imports = hsModImports parent 
-             (decls1,decls2)=break (\x->isFunOrPatBind x || isTypeSig x) decls      
-         ((toks,_),(v1, v2))<-get   
-         let loc1 = if decls2/=[]  -- there are function/pattern binding decls. 
-                    then let ((startRow,_),_) = startEndLocIncComments toks (ghead "addTopLevelDecl"  decls2)
-                         in  (startRow, 1)
-                    else simpPos0  -- no function/pattern binding decls in the module.
-             (toks1, toks2) = if loc1==simpPos0  then (toks, [])
-                                 else break (\t->tokenPos t==loc1) toks
-             declStr = case declToks of 
-                        Just ts ->  concatMap tokenCon (skipWhites ts) ++"\n" -- JULIEN
-                        Nothing -> prettyprint decl++"\n\n"
-             colOffset = if decls /=[] 
-                         then getOffset toks $ fst (getStartEndLoc toks (head decls))
-                         else case find has_location imports of
-                                Nothing -> 1
-                                Just i ->  getOffset toks $ fst (getStartEndLoc toks i)
-             newToks = tokenise (Pos 0 v1 1) colOffset True declStr
-             toks' = toks1 ++ newToks ++ toks2
-         put ((toks',modified),((tokenRow (glast "addTopLevelDecl" newToks) -10), v2)) 
-         -- (decl',_) <- addLocInfo (decl, newToks)
-         -- error "after"                                   
-         return (replaceDecls parent (decls1++decl++decls2))
-
-                where
-                  has_location (HsImportDecl src _ _ _ _) = srcChar src > 0
-
--- Added by Julien. 
--- The white spaces are skipped in all lines of a stream of tokens 
--- (the same amount of white space in all lines, 
--- determined by the number of white spaces in the first line).
-skipWhites :: [PosToken] -> [PosToken] 
-skipWhites ts = 
-      let n = nbwhites ts 
-      in shift_all_left n ts
-
-      where
-        nbwhites [] = 0
-        nbwhites ((Whitespace,_):r) = 1 + nbwhites r -- might not work with tabs (TO DO)
-        nbwhites _ = 0
-
-        shift_all_left n [] = []
-        shift_all_left n ts = 
-            let ts' = shift_left n ts 
-            in case split ts' of (s1,s2) -> s1 ++ shift_all_left n s2
-            
-            where 
-              
-              shift_left 0 ts = ts
-              shift_left n ((Whitespace,_):r) = shift_left (n-1) r
-              shift_left n _ = error "shift_left : unexpected token list. Bad indentation in declaration?"
-
-              split [] = ([],[])
-              split (t:r) = let n = line_number t in case split_aux n r of (a,b) -> ((t : a), b)
-                  where
-                    split_aux n [] = ([],[])
-                    split_aux n ts@(t:r) = if line_number t /= n then ([],ts) else case  split_aux n r of (a,b) ->  ((t:a),b)
-
-                    line_number (_,(p,_)) = line p
 
                            
 addTypeSigDecl parent pn (decl, declToks) topLevel
@@ -1060,7 +980,7 @@ addTypeSigDecl parent pn (decl, declToks) topLevel
         
          newSource  = if localDecls == []
                       then "where\n"++ concatMap (\l-> "  "++l++"\n") (lines newFun')
-                      else newFun' ++ "\n"
+                      else newFun'
             where
             newFun' = case newFunToks of 
                            Just ts -> concatMap tokenCon ts 
@@ -1521,8 +1441,7 @@ addHiding serverModName mod pns
            Just (True, ents) ->do ((toks,_),others)<-get  
                                   let (_,endPos)=getStartEndLoc toks imp
                                       (t, (_,s))=ghead "addHiding"  $ getToks (endPos,endPos) toks
-                                      newToken=mkToken t endPos ((if ents == [] then "" else ",")++
-                                                  showEntities pNtoName pns ++s)
+                                      newToken=mkToken t endPos (","++showEntities pNtoName pns ++s)
                                       toks'=replaceToks toks endPos endPos [newToken]
                                   put ((toks',modified),others) 
                                   return (replaceHiding imp  (Just (True, (map mkNewEnt  pns)++ents))) 
@@ -1769,27 +1688,27 @@ writeRefactoredFiles::Bool   -- ^ True means the current refactoring is a sub-re
          -> m ()  
 -}      
 writeRefactoredFiles (isSubRefactor::Bool) (files::[((String,Bool),([PosToken], HsModuleP))]) 
-    -- The AST is not used. 
-    -- isSubRefactor is used only for history (undo).
   = do let modifiedFiles = filter (\((f,m),_)->m==modified) files
-       PFE0.addToHistory isSubRefactor (map (fst.fst) modifiedFiles)
-       sequence_ (map modifyFile modifiedFiles)
+       addToHistory isSubRefactor $ map (fst.fst) modifiedFiles
+       mapM_ modifyFile modifiedFiles
        -- mapM_ writeTestDataForFile files   -- This should be removed for the release version.
-
+       {-   -- the 'writeTestDataForFile' causes a 'stack overflow' problem, when applying refactorings to
+          -- large-scale programs,and the possible reason might be lazy evaluation and the huge size of AST.
+         -}
      where
-       modifyFile ((fileName,_),(ts,_)) = do 
+       modifyFile ((fileName,_),(ts,mod)) = do
+           --let source =(render.ppi) mod 
            let source = concatMap (snd.snd) ts
-           seq (length source) (AbstractIO.writeFile fileName source) -- (Julien personnal remark) seq  forces the evaluation of its first argument and returns its second argument. It is unclear for me why (length source) evaluation is forced. 
-           -- (Julien) I have changed Unlit.writeHaskellFile into AbstractIO.writeFile (which is ok as long as we do not have literate Haskell files)
+           seq (length source) $ writeHaskellFile fileName source
            editorCmds <-getEditorCmds 
-           MT.lift (sendEditorModified editorCmds fileName)        
+           MT.lift $ sendEditorModified editorCmds fileName        
        writeTestDataForFile ((fileName,_),(ts,mod)) = do
            let source=concatMap (snd.snd) ts
            seq (length source) $ writeFile (createNewFileName "_TokOut" fileName) source 
            writeHaskellFile (createNewFileName "AST" fileName) ((render.ppi.rmPrelude) mod)   
        createNewFileName str fileName 
           =let (name, posfix)=span (/='.') fileName
-           in (name++str++posfix)
+           in (name++str++posfix) 
 
 --------------------------------------------------------------------------------------- 
 -----Remove the 'Prelude' imports added by Programatica------------------------------
@@ -2342,27 +2261,6 @@ locToExp2 beginPos endPos toks t
         atoms2Stmt _ = fail "last statement in a 'do' expression must be an expression"
 
 
-locToPatBind::(Term t) => SimpPos
-                       -> SimpPos
-                       -> [PosToken]
-                       -> t
-                       -> HsPatP
-locToPatBind beginPos endPos toks t
-  = fromMaybe defaultPat $ applyTU (once_tdTU (failTU `adhocTU` pat)) t
-     where
-       pat ((Dec (HsPatBind l p rhs ds))::HsDeclP) 
-         | inScope p = Just p
-       pat _ = Nothing
-
-
-       inScope p 
-          = let (startLoc, endLoc) 
-                 = if patToPNT p /= defaultPNT 
-                    then let (SrcLoc _ _ row col) = useLoc (patToPNT p)
-                         in ((row,col), (row,col))
-                    else getStartEndLoc toks p
-            in (startLoc>=beginPos) && (startLoc<= endPos) && (endLoc>= beginPos) && endLoc<=endPos 
-
 -- | Given the syntax phrase (and the token stream), find the largest-leftmost expression contained in the
 --  region specified by the start and end position. If no expression can be found, then return the defaultExp.
 locToPat::(Term t) => SimpPos            -- ^ The start position.
@@ -2650,8 +2548,9 @@ rmLocs t =runIdentity (applyTP (full_tdTP (idTP `adhocTP` exp
 
          alt ((HsAlt loc p e ds)::HsAltP)=return (HsAlt loc0 p e ds)
 
-         lit :: HsLiteral -> Identity HsLiteral 
-         lit l = return l
+         lit (HsInt int) = return (HsInt int)
+         lit (HsFrac rat)= return (HsFrac rat)
+         lit (HsString s) = return (HsString s)
 
          pnt (PNT pname ty _)= return (PNT pname ty (N (Just loc0)))
 
@@ -3153,8 +3052,8 @@ hsFreeAndDeclaredPNs t=do (f,d)<-hsFreeAndDeclared' t
                    return ((bf `union` pf) \\ pd, [])
           exp (Exp (HsLet decls exp))
               = do (df,dd)<- hsFreeAndDeclaredPNs decls
-                   (ef,df')<- hsFreeAndDeclaredPNs exp 
-                   return ((df `union` (ef \\ dd)), dd ++ df') -- [])
+                   (ef,df)<- hsFreeAndDeclaredPNs exp 
+                   return ((df `union` (ef \\ dd)), dd ++ df) -- [])
           exp (Exp (HsRecConstr _  (PNT pn _ _) e))
                =addFree  pn  (hsFreeAndDeclaredPNs e)   --Need Testing
           exp (Exp (HsAsPat (PNT pn _ _) e))
@@ -3177,7 +3076,7 @@ hsFreeAndDeclaredPNs t=do (f,d)<-hsFreeAndDeclared' t
 
          -------Added by Huiqing Li-------------------------------------------------------------------
 
-          patBind ((Dec (HsPatBind _ pat (HsBody rhs) decls))::HsDeclP) -- WARNING: NO CASE FOR HsGuard !!!
+          patBind ((Dec (HsPatBind _ pat (HsBody rhs) decls))::HsDeclP)
              =do (pf,pd) <- hsFreeAndDeclaredPNs pat
                  (rf,rd) <- hsFreeAndDeclaredPNs rhs
                  (df,dd) <- hsFreeAndDeclaredPNs decls
@@ -3498,7 +3397,7 @@ instance HsDecls HsStmtP where
     isDeclaredIn pn (HsGenerator _ pat exp stmts) -- Claus
         =fromMaybe False (do (pf,pd) <-hsFreeAndDeclaredPNs pat
                              Just (elem pn pd))
-             
+
     isDeclaredIn pn (HsLetStmt decls stmts)
         =fromMaybe False (do (df,dd) <-hsFreeAndDeclaredPNs decls
                              Just (elem pn dd))
@@ -3740,7 +3639,7 @@ findPNByPath path mod
 -- type of the function.
 -- checkTypes also removes the return type of the fuction/pattern as we are only interested in
 -- the type of the arguments.
--- checkTypes :: [Char] ->String -> String -> String -> Bool
+-- checkTypes :: String -> String -> Bool
 checkTypes dat name modName fileName = or (map (ordSubset dat) (tails (ghcTypeCheck1 name modName fileName)))
 
 
@@ -3788,7 +3687,6 @@ removeGHCBracket (x:xs)
 -- checkTypes2 is the same as checkTypes, the only difference is that it returns 
 -- which argument (the arity) is of the type in question.
 -- currently it returns the number of the first argument of the type in question.
-checkTypes2 :: [Char] -> String -> String -> String -> (Bool, [Int])
 checkTypes2 dat name modName fileName
  | res /= []  = (True, res2)
  | otherwise  = (False, []) 
