@@ -4,12 +4,12 @@ module RefacGenDef(generaliseDef) where
 
 import PrettyPrint
 import PosSyntax
-import Maybe
+import Data.Maybe
 import TypedIds
 import UniqueNames 
 import PNT 
 import TiPNT   
-import List 
+import Data.List 
 import RefacUtils
 
 {-A definition can be generialised by selecting a sub-expression of the RHS of the definition,

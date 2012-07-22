@@ -1,10 +1,10 @@
 module Main where
 
-import System
+import System.Environment
 import Control.Exception
 import System.IO.Unsafe
 import System.IO
-import List
+import Data.List
 import Unsafe.Coerce
 -- Package GHC stuff
 import GHC

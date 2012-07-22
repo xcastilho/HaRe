@@ -2,8 +2,8 @@
 
 module RefacMvDefBtwMod(moveDefBtwMod) where
 
-import Maybe
-import List 
+import Data.Maybe
+import Data.List 
 import RefacUtils  hiding (getQualifier)
 import PFE0 (findFile)
 import PrettyPrint

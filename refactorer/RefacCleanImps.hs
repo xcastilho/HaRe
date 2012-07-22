@@ -3,9 +3,9 @@
 module RefacCleanImps(cleanImports,mkImpExplicit,addToExport,rmFromExport) where
 
 import PosSyntax
-import Maybe
+import Data.Maybe
 import TypedIds
-import List hiding (delete)
+import Data.List hiding (delete)
 import RefacUtils 
 import UniqueNames hiding (srcLoc)
 import HsName hiding (ModuleName)

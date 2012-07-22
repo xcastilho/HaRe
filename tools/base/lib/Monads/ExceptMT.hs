@@ -4,7 +4,7 @@ module ExceptMT (HasExcept(..), MT(..), WithExcept, removeExcept, mapExcept)
 import MT
 import Control_Monad_Fix 
 
-import Monad(liftM,MonadPlus(..))
+import Control.Monad(liftM,MonadPlus(..))
 
 newtype WithExcept x m a   = E { removeExcept :: m (Either x a) } 
 iso f = E . f . removeExcept

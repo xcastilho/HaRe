@@ -37,8 +37,8 @@ import HsExpUtil
 import PNT 
 
 import RefacTypeSyn
-import Maybe
-import List
+import Data.Maybe
+import Data.List
 import SourceNames
 -------------------------
 --import DriftStructUtils  

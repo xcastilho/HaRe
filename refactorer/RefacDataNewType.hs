@@ -9,7 +9,7 @@ import TypedIds
 import UniqueNames hiding (srcLoc)
 import PNT
 import TiPNT
-import List
+import Data.List
 import RefacUtils
 import PFE0 (findFile)
 import MUtils (( # ))
