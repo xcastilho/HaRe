@@ -48,7 +48,7 @@ variable was in the first one. All possibles patterns were contemplated.
 -}
     findConsist,
     isConsist,
-    
+
     -- ** Merge of matches
 {- | After knowing which matches can be manipulated and swaped, the next step
 is to try to merge matches using all possible combinations.
@@ -93,7 +93,7 @@ the associated pattern are splited into two different patterns, and after the
 recursive evaluation the resulting variable is \"glued\" back to the resulting
 pattern. If only one match have this construction, then the variable is
 replaced by a fresh variable, so that the same variable can also be assigned
-to the second pattern; 
+to the second pattern;
 
 [Irrefutable pattern] When a irrefutable pattern is found, it is replaced by a
 fresh variable, and inside the guards and in the main expression a /let/
@@ -126,8 +126,8 @@ the tuple or list constructor.
 {- | The final stage is the most simple one, since there are not many cases to
 evaluate. The function 'guards2ifs' is applied to each match with a guard and
 with the consisty check mark. When the /otherwise/ guard is not found
-the /else/ of the resultig expression issues an error message. 
--} 
+the /else/ of the resultig expression issues an error message.
+-}
     guards2ifs,
 
     -- * Auxiliary functions
@@ -139,7 +139,7 @@ refactoring are presented. This functions may be of some use in later refactorin
     replaceExp,
     declsToLet,
     pRecToPApp
-    
+
     -- * Future work
 {- | This refactoring tries to be as complete as possible, but it is still
 possible to improve some cases. A possible improvement would be to infer the /otherwise/
@@ -169,22 +169,22 @@ before converting them into /if then else/'s.
 
 import RefacUtils
 import PrettyPrint (pp)
-import Maybe 
-import Control.Monad.State 
+import Data.Maybe
+import Control.Monad.State
 
 type Match = HsMatchI PNT (HsExpI PNT) (HsPatI PNT) [HsDeclI PNT]
 
-guardToIte args  
- = do let fileName = ghead "filename" args       
-          row      = read (args!!1)::Int        
-          col      = read (args!!2)::Int        
-      modInfo@(_,exps, mod, _)<-parseSourceFile fileName  
-      let pn =locToPN fileName (row, col) mod                                 
+guardToIte args
+ = do let fileName = ghead "filename" args
+          row      = read (args!!1)::Int
+          col      = read (args!!2)::Int
+      modInfo@(_,exps, mod, _)<-parseSourceFile fileName
+      let pn =locToPN fileName (row, col) mod
           decls = definingDecls [pn] (hsModDecls mod) False False
       if decls /= []
          then do r <- applyRefac (replaceGuards (head decls)) (Just modInfo) fileName
-                 writeRefactoredFiles False [r]      
-         else error "\nInvalid cursor position!"  
+                 writeRefactoredFiles False [r]
+         else error "\nInvalid cursor position!"
 
 
 
@@ -195,9 +195,9 @@ replaceGuards d@(Dec (HsFunBind loc matches)) (_,_,mod)
              initSt = getInitSt [m | (b,m) <- newMs1, b]
              newMs2 = map declsToLet' newMs1
              newMs3 = dmerge newMs2 initSt
-             newMs4 = map guards2ifs newMs3 
+             newMs4 = map guards2ifs newMs3
          update d
-                -- to see intermediate results use this line with the desired number 
+                -- to see intermediate results use this line with the desired number
                 --(error (show [(b,pp m) | (b,m)<-newMs1]))
                 --(Dec (HsFunBind loc (map snd newMs1)))
                 (Dec (HsFunBind loc newMs4))
@@ -211,7 +211,7 @@ guards2ifs (True, HsMatch l i p (HsGuard lst) ds) = HsMatch l i p (HsBody $ g2i 
      where
         -- the empty list should never occur
         g2i [] = error "empty list of guards!"
-        g2i [(loc,cond,exp)] 
+        g2i [(loc,cond,exp)]
             | isOtherwise cond = exp
             | otherwise = mkIte cond exp undefError
         g2i ((loc,cond,exp):xs) = mkIte cond exp (g2i xs)
@@ -225,17 +225,17 @@ guards2ifs (True, HsMatch l i p (HsGuard lst) ds) = HsMatch l i p (HsBody $ g2i 
         mkIte e1 e2 e3 = Exp (HsIf e1 e2 e3)
 
         undefError = (Exp (HsApp (Exp (HsId (HsVar (PNT (PN (UnQual "error")
-                     (G (PlainModule "Prelude") "error" 
+                     (G (PlainModule "Prelude") "error"
                      (N (Just loc0)))) Value (N (Just loc0)))))) (Exp
                      (HsLit loc0 (HsString "UnMatched Pattern")))))
 
 guards2ifs (_,x) = x
 
-     
+
 
 
 --------------------------
---- Consistency check ---- 
+--- Consistency check ----
 --------------------------
 
 -- | Given a set of matches, checks which ones have guards that can be
@@ -244,7 +244,7 @@ guards2ifs (_,x) = x
 --  It uses the binary function 'isConsist'.
 findConsist :: [HsMatchP] -> [(Bool,HsMatchP)]
 findConsist [] = []
-findConsist (m:ms) 
+findConsist (m:ms)
        = let ms' = findConsist ms
          in case m of
             (HsMatch _ _ pats (HsGuard _) _)
@@ -259,7 +259,7 @@ findConsist (m:ms)
     checkGuard (HsMatch _ _ _ (HsGuard _) _) Nothing = True
     checkGuard (HsMatch _ _ _ _ _) Nothing = False
     checkGuard _ (Just x) = x
-    
+
 
 -- | Checks if two lists of patterns are consistents. Possible results are:
 --
@@ -274,7 +274,7 @@ isConsist _ [] = Nothing
 -- similar values -> continue
 isConsist (p1:pats1) (p2:pats2) | p1 `similar` p2
     = isConsist pats1 pats2
--- different constants -> True 
+-- different constants -> True
 isConsist (k1:pats1) (k2:pats2) | isConstant k1 && isConstant k2
     = if k1 `differ` k2  then Just True
                          else isConsist pats1 pats2
@@ -324,7 +324,7 @@ unfoldPat (Pat prec@(HsPRec constr fields))
     = unfoldPat (Pat $ pRecToPApp prec)
 unfoldPat (Pat (HsPList _ lst))
     = (Pat $ HsPId $ HsCon $ nameToPNT "(:)"):lst -- the name is not important
-unfoldPat (Pat (HsPTuple _ lst)) 
+unfoldPat (Pat (HsPTuple _ lst))
     = (Pat $ HsPId $ HsCon $ nameToPNT "(tup)"):lst -- the name is not important
 unfoldPat x@(Pat _) = [unparen x]
 
@@ -333,10 +333,10 @@ unparen x = x
 
 
 
-                   
+
 
 -------------------------
---- merge of matches ---- 
+--- merge of matches ----
 -------------------------
 
 -- To create fresh variables a partial State monad is used, to store the base name and the seed.
@@ -384,12 +384,12 @@ getInitSt ms
 -- The state of each evaluation of 'mergeMatches' as to be extracted to be
 --  passed to further calls. It doesn't make sense to put the same state
 --  inside 'dmerge', because it would fail when the first 'mergeMatches' failed,
---  which is not desired.  
+--  which is not desired.
 dmerge :: [(Bool,HsMatchP)] -> St -> [(Bool,HsMatchP)]
 dmerge [] _ = []
 dmerge [x] _ = [x]
 dmerge ((False,h):rest) st = (False,h):(dmerge rest st)
-dmerge ((True,h):rest) st 
+dmerge ((True,h):rest) st
     = case dmerge2 h rest st of
         Just (st',newMs) -> dmerge newMs st'
         Nothing -> (True,h) : (dmerge rest st)
@@ -411,7 +411,7 @@ tryMergeMatches h t st
              st' <- getSt
              return (st',newM))
          st
-                 
+
 
 
 {- | Tries to merge two matches with guards, using a state monad to create
@@ -427,19 +427,19 @@ mergeMatches (HsMatch l1 i1 [] (HsGuard lst1) ds) (HsMatch l2 i2 [] (HsGuard lst
 
 -- similar values
 mergeMatches (HsMatch l1 i1 (p1:pats1)  e1 [])
-             (HsMatch l2 i2 (p2:pats2)  e2 []) 
-    | p1 `similar` p2 
+             (HsMatch l2 i2 (p2:pats2)  e2 [])
+    | p1 `similar` p2
      = do HsMatch l i ps e _ <- mergeMatches (HsMatch l1 i1 pats1 e1 [])
                                              (HsMatch l2 i2 pats2 e2 [])
           return $ HsMatch l i (p1:ps) e []
 
 -- parentisis
 mergeMatches (HsMatch l1 i1 ((Pat (HsPParen p1)):ps1) e1 [])
-             (HsMatch l2 i2 ((Pat (HsPParen p2)):ps2) e2 []) 
+             (HsMatch l2 i2 ((Pat (HsPParen p2)):ps2) e2 [])
     = do HsMatch l i (p:ps) e _ <- mergeMatches (HsMatch l1 i1 (p1:ps1) e1 [])
                                                 (HsMatch l2 i2 (p2:ps2) e2 [])
          return $ HsMatch l i ((Pat (HsPParen p)):ps) e []
-mergeMatches (HsMatch l1 i1 ((Pat (HsPParen p1)):ps1) e1 []) m2 
+mergeMatches (HsMatch l1 i1 ((Pat (HsPParen p1)):ps1) e1 []) m2
     = do HsMatch l i (p:ps) e _ <- mergeMatches (HsMatch l1 i1 (p1:ps1) e1 []) m2
          return $ HsMatch l i ((Pat (HsPParen p)):ps) e []
 mergeMatches m1 (HsMatch l2 i2 ((Pat (HsPParen p2)):ps2) e2 [])
@@ -517,7 +517,7 @@ mergeMatches (HsMatch l1 i1 ps1 e1 [])
              (HsMatch l2 i2 (Pat (r@(HsPRec _ _)):ps2) e2 [])
     = mergeMatches (HsMatch l1 i1 ps1 e1 [])
                    (HsMatch l2 i2 ((Pat (pRecToPApp r)):ps2) e2 [])
-                    
+
 
 -- 2 variables (different)
 mergeMatches (HsMatch l1 i1 ((Pat (HsPId (HsVar var1))):pats1)  e1 [])
@@ -543,7 +543,7 @@ mergeMatches (HsMatch l1 i1 ((Pat (HsPApp pnt1 lst1)):pats1)  e1 [])
 mergeMatches (HsMatch l1 i1 ((Pat (HsPInfixApp pl1 op1 pr1)):pats1)  e1 [])
              (HsMatch l2 i2 ((Pat (HsPInfixApp pl2 op2 pr2)):pats2)  e2 [])
    | op1 `similar` op2
-    = do HsMatch l i (pl:pr:ps) e _ <- 
+    = do HsMatch l i (pl:pr:ps) e _ <-
                   mergeMatches (HsMatch l1 i1 (pl1:pr1:pats1) e1 [])
                                (HsMatch l2 i2 (pl2:pr2:pats2) e2 [])
          return $ HsMatch l i ((Pat (HsPInfixApp pl op2 pr)):ps) e []
@@ -567,7 +567,7 @@ mergeMatches (HsMatch l1 i1 ((Pat (HsPTuple loc1 lst1)):pats1)  e1 [])
          return $ HsMatch l i ((Pat (HsPTuple loc1 lst')):ps') e []
 
 -- merge is not possible
-mergeMatches m1 m2 
+mergeMatches m1 m2
     = fail "no merge possible"
 
 
@@ -591,7 +591,7 @@ declsToLet (HsGuard lst) ds = HsGuard $ map aux lst
     where aux (l,e1,e2) = (l,Exp (HsLet ds e1) , Exp (HsLet ds e2))
 
 addLet :: HsPatP -> HsExpP -> RhsP -> RhsP
-addLet pat exp1 (HsBody exp2) 
+addLet pat exp1 (HsBody exp2)
     = HsBody $ Exp (HsLet [Dec $ HsPatBind loc0 pat (HsBody exp1) []] exp2)
 addLet pat exp1 (HsGuard lst) =  HsGuard $ map aux lst
     where aux (l,e1,e2) = (l,
@@ -619,7 +619,7 @@ replaceExp pnt str locPnt exp
           exp2 = let loc1 = getLoc pnt
                      loc2 = getSLoc $ fromJust locPnt
                  in replaceSLoc loc1 loc2 exp1
-      in if isJust locPnt then exp2 
+      in if isJust locPnt then exp2
                           else exp1
   where
     getLoc = useLoc

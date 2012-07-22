@@ -1,8 +1,8 @@
 module GenEditorInterfacesAux where
 
-import List
-import IO(hPutStrLn,stderr)
-import System(exitFailure)
+import Data.List
+import System.IO(hPutStrLn,stderr)
+import System.Exit(exitFailure)
 
 import LocalSettings
 

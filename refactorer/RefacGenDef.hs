@@ -4,12 +4,12 @@ module RefacGenDef(generaliseDef, generaliseDef2) where
 
 import PrettyPrint
 import PosSyntax
-import Maybe
+import Data.Maybe
 import TypedIds
 import UniqueNames 
 import PNT 
 import TiPNT   
-import List 
+import Data.List 
 import RefacUtils
 import Debug.Trace
 

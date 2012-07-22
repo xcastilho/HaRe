@@ -16,7 +16,7 @@ to these functions.
 Most of this is not used at the moment.
 -}
 module TiClassInst2({-tcClassDecl,tcInstDecl,-}tcInstOrClassDecl'') where
-import List((\\))
+import Data.List((\\))
 
 --import HasBaseStruct(HasBaseStruct(..),hsTypeSig,hsClassDecl,hsInstDecl)
 import HasBaseStruct
@@ -65,7 +65,7 @@ hsClassDecl2 d1 {-bs-} mi@(ms,_,_) src ctx cl fdeps msigs ds =
     do defaultInst <- hsDefaultMethods dn mi src ctx cl ds
        --m <- getModule
        let fields =
-	     [HsRecDecl src cn 
+	     [HsRecDecl src cn
 		 (supers++
 		 [([i],unb (hsTyForall' vs (funT (c++[t]))))
                   | HsVar i:>:Forall vs (c:=>t)<-ms])]

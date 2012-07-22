@@ -8,8 +8,8 @@ module RefacRedunDec (convertPatsToPn,
  
 
 import AbstractIO
-import Maybe
-import List
+import Data.Maybe
+import Data.List
 import RefacUtils
 import RefacLocUtils
 

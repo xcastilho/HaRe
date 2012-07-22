@@ -1,5 +1,5 @@
 ------------------------------------------------------------------------------
--- | 
+-- |
 -- Maintainer	: Ralf Laemmel, Joost Visser
 -- Stability	: experimental
 -- Portability	: portable
@@ -13,11 +13,11 @@
 
 module MonadicFunctions where
 
-import Monad
+import Control.Monad
 
 
 ------------------------------------------------------------------------------
--- * The identity monad 
+-- * The identity monad
 
 -- | Identity type constructor.
 newtype Id a = Id a
@@ -34,18 +34,18 @@ instance Monad Id where
 ------------------------------------------------------------------------------
 -- * Recover from partiality
 
--- | Force success. If the argument value corresponds to failure, 
+-- | Force success. If the argument value corresponds to failure,
 --   a run-time error will occur.
 succeed :: Maybe x -> x
 succeed (Just x) = x
 succeed Nothing  = error "Didn't succeed!."
- 
+
 ------------------------------------------------------------------------------
 -- * Prototypes for strategy combinators seq, let, choice
 
 -- | Sequential composition of monadic functions
 mseq 		:: Monad m => (a -> m b) -> (b -> m c) -> a -> m c
-f `mseq` g    	=  \x -> f x >>= g 
+f `mseq` g    	=  \x -> f x >>= g
 
 -- | Sequential composition with value passing; a kind of monadic let.
 mlet 		:: Monad m => (a -> m b) -> (b -> a -> m c) -> a -> m c

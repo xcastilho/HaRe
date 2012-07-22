@@ -5,11 +5,11 @@ import TiContextReduction
 import TiSolve(expandSynonyms)
 import TiFunDeps(closure)
 import SrcLoc1
-import Lists(partition,(\\\),nubBy)
+import Data.Lists(partition,(\\\),nubBy)
 import OpTypes(eqBy)
 import MUtils
 import PrettyPrint
-import Monad(msum,unless)
+import Control.Monad(msum,unless)
 
 resolveToplevelAmbiguities ps = resolveAmbiguities' (tv ps) ps
  

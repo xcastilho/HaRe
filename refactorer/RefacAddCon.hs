@@ -13,24 +13,24 @@
 -----------------------------------------------------------------------------
 
 module RefacAddCon where
- 
+
 import PrettyPrint
 import PrettyPrint
 import PosSyntax
 import AbstractIO
-import Maybe
+import Data.Maybe
 import TypedIds
 import UniqueNames hiding (srcLoc)
 import PNT
 import TiPNT
-import List
+import Data.List
 import RefacUtils hiding (getParams)
 import PFE0 (findFile)
 import MUtils (( # ))
 import RefacLocUtils
-import System
-import IO
-import Char
+-- import System
+import System.IO
+import Data.Char
 
 -- | An argument list for a function which of course is a list of paterns.
 type FunctionPats = [HsPatP]
@@ -43,73 +43,73 @@ alphabet :: String
 alphabet = "abcdefghijklmnopqrstuvwxyz"
 
 refacAddCon args
-  = do 
+  = do
        let len = length args
-       if len > 2 
-         then do 
+       if len > 2
+         then do
             let (first,sec) = splitAt ((length args)-2) args
             let fileName    = first!!0
                 ans         = concat ( map ( ++ " ") (tail first))
                 row         = read (sec!!0)::Int
                 col         = read (sec!!1)::Int
-            AbstractIO.putStrLn "refacAddCon"   
-            
+            AbstractIO.putStrLn "refacAddCon"
+
             -- let modName = convertModName modName1            -- Parse the input file.
-            modInfo@(inscps, exps, mod, tokList) <- parseSourceFile (fileName)   
+            modInfo@(inscps, exps, mod, tokList) <- parseSourceFile (fileName)
             let res1 = locToPNT fileName (row, col) mod
                 res2 = locToPN fileName (row, col) mod
                 decs = hsDecls mod
                 datDec = definingDecls [res2] decs False True
                 datName = (declToName (ghead "datName" datDec))
                 datPNT = (declToPNT (ghead "datPNT" datDec))
-                 
+
                  -- add any new type params...
 
-            ((_,m), (newToks, newMod)) <- applyRefac (addField (ghead "applyRefac" datDec) datPNT datName res1 (drop 1 (tail first)) tokList) 
+            ((_,m), (newToks, newMod)) <- applyRefac (addField (ghead "applyRefac" datDec) datPNT datName res1 (drop 1 (tail first)) tokList)
                                                      (Just (inscps, exps, mod, tokList)) fileName
-       
+
             writeRefactoredFiles False [((fileName, m), (newToks, newMod))]
-                
-            (s, col', row', inf) <- doFileStuff fileName row col ans    
-            modName1 <- fileNameToModName fileName 
+
+            (s, col', row', inf) <- doFileStuff fileName row col ans
+            modName1 <- fileNameToModName fileName
 
             let modName = convertModName modName1            -- Parse the input file.
-            modInfo@(inscps, exps, mod, tokList) <- parseSourceFile (fileName)              
+            modInfo@(inscps, exps, mod, tokList) <- parseSourceFile (fileName)
             -- Find the datatype that's been highlighted as the refactree
-            
+
             {- case checkCursor fileName row col mod of
               Left errMsg -> do AbstractIO.removeFile (fileName ++ ".temp.hs")
                                 error errMsg
               Right dat ->
                 do
-                 
+
                 -}
-                
+
             let res' = locToPNT fileName (row, col) mod
-                res = pNTtoPN res'   
+                res = pNTtoPN res'
                  -- Parse the input file.
             AbstractIO.putStrLn ("parsing ..." ++ fileName ++ ".temp.hs")
-            modInfo2@(inscps', exps', mod', tokList') <- parseSourceFileOld (fileName ++ ".temp.hs") 
-            AbstractIO.putStrLn "parsed."                                               
+            modInfo2@(inscps', exps', mod', tokList') <- parseSourceFileOld (fileName ++ ".temp.hs")
+            AbstractIO.putStrLn "parsed."
             let decs = hsDecls mod'
-                -- datDec = definingDecls [res] decs False True                
+                -- datDec = definingDecls [res] decs False True
                  -- get the list of constructors from the data type
                 decs' = hsDecls mod
                 datDec'' = definingDecls [res2] decs False True
-                datDec' = ghead "datDec'" datDec'' 
+                datDec' = ghead "datDec'" datDec''
                 -- datName = getDataName [datDec']
-                pnames = definedPNs datDec' 
+                pnames = definedPNs datDec'
                 newPN = locToPN (fileName ++ ".temp.hs") (row', col') mod'
                 newPNT = locToPNT (fileName ++ ".temp.hs") (row', col') mod'
             numParam <- getParams datDec' newPNT
             let oldPnames = filter (/= newPN) pnames
                 position = findPos 0 newPN pnames
-                
-            ((_,m), (newToks, newMod)) <- applyRefac (addCon (fileName) datName pnames newPN newPNT numParam oldPnames position inf (tail first) modName) 
+
+            ((_,m), (newToks, newMod)) <- applyRefac (addCon (fileName) datName pnames newPN newPNT numParam oldPnames position inf (tail first) modName)
                                                                  (Just (inscps', exps', mod', tokList')) (fileName++"temp.hs")
-            writeRefactoredFiles True [((fileName, m), (newToks, newMod))]           
-            AbstractIO.removeFile (fileName ++ ".temp.hs")                         
-            AbstractIO.putStrLn "Completed.\n"      
+            writeRefactoredFiles True [((fileName, m), (newToks, newMod))]
+            AbstractIO.removeFile (fileName ++ ".temp.hs")
+            AbstractIO.putStrLn "Completed.\n"
          else do
             error "refacAddCon must take a new constructor and a list of arguments."
 
@@ -117,7 +117,7 @@ addField datDec datPNT pnt fName fType tok (_, _, t)
  = do
       newMod <- addTypeVar datDec datPNT pnt fType tok t
       return newMod
-      
+
 addingField pnt fName fType t
  = applyTP (stop_tdTP (failTP `adhocTP` inDat)) t
     where
@@ -128,55 +128,55 @@ addingField pnt fName fType t
      inDat (dat@(HsRecDecl s i c p types)::HsConDeclP)
        | p == pnt = do
                       r <- update dat (HsRecDecl s i c p (newRecTypes types fName fType)) dat
-                      return r    
+                      return r
      inDat _ = fail ""
-     
-     
+
+
      -- newRecTypes must check that the name is not already declared as a field name
      -- within that constructor.
      newRecTypes xs n []  = xs
-     newRecTypes xs n (a:as) 
+     newRecTypes xs n (a:as)
        | n `elem` (map pNTtoName (unFlattern xs)) = error "There is already a field declared with that name!"
        | otherwise =  ([nameToPNT n], (HsUnBangedType (Typ (HsTyCon (nameToPNT a))))) : (newRecTypes xs n as)
 
      unFlattern :: [([a],b)] -> [a]
      unFlattern [] = []
      unFlattern ((xs, y):xss) = xs ++ (unFlattern xss)
-                                 
+
 
      newTypes xs [] = xs
-     newTypes xs (a:as) = HsUnBangedType (Typ (HsTyCon (nameToPNT a))) : (newTypes xs as)   
+     newTypes xs (a:as) = HsUnBangedType (Typ (HsTyCon (nameToPNT a))) : (newTypes xs as)
 
 addTypeVar datDec datName pnt fType toks t
  = applyTP (full_buTP (idTP `adhocTP` (inDatDeclaration datDec))) t
     where
-      inDatDeclaration _ (dat@(Dec (HsDataDecl a b tp c d))::HsDeclP) 
+      inDatDeclaration _ (dat@(Dec (HsDataDecl a b tp c d))::HsDeclP)
         | (defineLoc datName == (defineLoc.typToPNT.(ghead "inDatDeclaration").flatternTApp) tp) &&
-          checkIn fType tp 
-          = update dat (Dec (HsDataDecl a b (createTypFunc ((typToPNT.(ghead "inDatDeclaration").flatternTApp) tp) 
+          checkIn fType tp
+          = update dat (Dec (HsDataDecl a b (createTypFunc ((typToPNT.(ghead "inDatDeclaration").flatternTApp) tp)
                                               ( ((map nameToTyp fType') ++ (tail (flatternTApp tp))) )) c d)) dat
-            
+
              where
               fType' = checkInOne2 tp [" "] fType
-                                              
-      inDatDeclaration (Dec (HsDataDecl _ _ tp _ _)) (dat@(Dec (HsTypeSig s is c t))::HsDeclP) 
+
+      inDatDeclaration (Dec (HsDataDecl _ _ tp _ _)) (dat@(Dec (HsTypeSig s is c t))::HsDeclP)
         | (pNTtoName datName) `elem` (map (pNTtoName.typToPNT) (flatternTApp t) )
           = do
-               
+
                let res = changeType t tp
                if res == t
                  then return dat
                  else update dat (Dec (HsTypeSig s is c res)) dat
 
       inDatDeclaration _ t = return t
-      
+
       checkIn [] tp = True
-      checkIn (fType:fTypes) tp = 
+      checkIn (fType:fTypes) tp =
        (fType `elem` (map (pNTtoName.typToPNT) (flatternTApp tp))) == False &&
             isLower (ghead "checkIn" fType) || (checkIn fTypes tp)
-      
+
       checkInOne t tp n [] = []
-      checkInOne t tp n (f:fs) 
+      checkInOne t tp n (f:fs)
         | (f `elem` (map (pNTtoName.typToPNT) (flatternTApp tp))) &&
               isLower (ghead "checkInOne" f) = checkInOne t tp n fs
         | (f `elem` (map (pNTtoName.typToPNT) (flatternTApp t))) &&
@@ -187,41 +187,41 @@ addTypeVar datDec datName pnt fType toks t
 
             where
               newName = (mkNewName f (n ++ (map (pNTtoName.typToPNT) (flatternTApp tp))) 1)
-       
+
       checkInOne2 tp n [] = []
-      checkInOne2 tp n (f:fs) 
+      checkInOne2 tp n (f:fs)
         | (f `elem` (map (pNTtoName.typToPNT) (flatternTApp tp))) == False &&
              isLower (ghead "checkInOne" f) = f : (checkInOne2 tp n fs)
-        | otherwise = checkInOne2 tp n fs 
-       
-        
+        | otherwise = checkInOne2 tp n fs
+
+
       changeType :: HsTypeP -> HsTypeP -> HsTypeP
       changeType t@(Typ (HsTyFun t1 t2)) tp
-            = (Typ (HsTyFun (changeType t1 tp) (changeType t2 tp)))   
+            = (Typ (HsTyFun (changeType t1 tp) (changeType t2 tp)))
       changeType t@(Typ (HsTyApp (Typ (HsTyCon p)) t2)) tp
-        | (defineLoc datName) == (defineLoc p) && 
-          checkIn fType t 
-            = createTypFunc ((typToPNT.(ghead "inDatDeclaration").flatternTApp) t) 
-                                              ( ((map nameToTyp fType') ++ (tail (flatternTApp t)))) 
+        | (defineLoc datName) == (defineLoc p) &&
+          checkIn fType t
+            = createTypFunc ((typToPNT.(ghead "inDatDeclaration").flatternTApp) t)
+                                              ( ((map nameToTyp fType') ++ (tail (flatternTApp t))))
              where
               fType' = checkInOne t tp [" "] fType
       changeType t@(Typ (HsTyApp t1 t2)) tp
             = (Typ (HsTyApp (changeType t1 tp) (changeType t2 tp)))
-      
+
               -- fType'' = checkNames ftype' t
       changeType t@(Typ (HsTyCon p)) tp
-        | (defineLoc datName) == (defineLoc p) && 
+        | (defineLoc datName) == (defineLoc p) &&
              checkIn fType t
-               = createTypFunc ((typToPNT.(ghead "inDatDeclaration").flatternTApp) t) 
+               = createTypFunc ((typToPNT.(ghead "inDatDeclaration").flatternTApp) t)
                                               ( ((map nameToTyp fType') ++ (tail (flatternTApp t))))
             where
               fType' = checkInOne t tp [" "] fType
       changeType t tp = t
-      
+
       flatternTApp :: HsTypeP -> [HsTypeP]
       flatternTApp (Typ (HsTyFun t1 t2)) = flatternTApp t1 ++ flatternTApp t2
       flatternTApp (Typ (HsTyApp t1 t2)) = flatternTApp t1 ++ flatternTApp t2
-      flatternTApp x = [x]   
+      flatternTApp x = [x]
 
 
 
@@ -229,13 +229,13 @@ checkCursor :: String -> Int -> Int -> HsModuleP -> Either String HsDeclP
 checkCursor fileName row col mod
  = case locToTypeDecl of
      Nothing -> Left ("Invalid cursor position. Please place cursor at the beginning of the constructor name!")
-     Just decl@(Dec (HsDataDecl loc c tp xs _)) -> Right decl          
+     Just decl@(Dec (HsDataDecl loc c tp xs _)) -> Right decl
    where
     locToTypeDecl = find (definesTypeCon (locToPNT fileName (row, col) mod)) (hsModDecls mod)
-    
-    -- definesTypeCon pnt (Dec (HsDataDecl loc c tp xs _)) 
+
+    -- definesTypeCon pnt (Dec (HsDataDecl loc c tp xs _))
     --  = isDataCon pnt && (findPNT pnt tp)
-    
+
     definesTypeCon pnt (Dec (HsDataDecl _ _ _ i _))
       = isDataCon pnt && (findPNT pnt i)
     definesTypeCon pnt _ = False
@@ -261,25 +261,25 @@ convertModName m@(MainModule f) = modNameToStr m
 
 findPos _ _ [] = 0
 findPos count newPn (x:xs)
- | newPn == x = count 
+ | newPn == x = count
  | otherwise  = findPos (count + 1) newPn xs
 
-getBeforePN _ _ [] = 0            
+getBeforePN _ _ [] = 0
 getBeforePN c newPN (x:xs)
   | newPN /= x = (c + 1) + (getBeforePN (c + 1)newPN xs)
-  | otherwise = c      
-            
+  | otherwise = c
+
 createFun (x:xs) newPN datName
  = Dec ( HsPatBind loc0 (pNtoPat funPName) (HsBody (nameToExp ("error \"added " ++ (concat (map ( ++ " ") (x:xs))) ++ "to " ++ datName ++ "\"") )) [] )
     where funPName= PN (UnQual ("added" ++ x)) (S loc0)
 
-            
+
 getParams (Dec (HsDataDecl _ _ _ cons _)) newPNT
  = numParam cons
      where
        numParam [] = return 0
        numParam (x@(HsConDecl _ _ _ pnt list):cs)
-        | newPNT == pnt = do 
+        | newPNT == pnt = do
                              list' <- countCon x
                              return $ length list'
         | otherwise = do x <- numParam cs
@@ -291,8 +291,8 @@ getParams (Dec (HsDataDecl _ _ _ cons _)) newPNT
                          return x
 
        -- numParam _ = return 0
-       
-countCon :: (MonadPlus m, Term t) => t -> m [Int]  
+
+countCon :: (MonadPlus m, Term t) => t -> m [Int]
 countCon co
  = applyTU (full_tdTU (constTU [] `adhocTU` inCon)) co
     where
@@ -306,41 +306,41 @@ countCon' co
     where
       inCon a@((x, _)::([PNT], HsBangType HsTypeP)) = return $ replicate (length x) 0
       -- inCon _ = return []
-      
-       
+
+
 addCon fileName datName pnames newPn newPNT numParam oldPnames  position inf xs modName (inscps, exps, mod)
  = do
       newMod <- addDecl mod Nothing ([createFun xs newPn datName], Nothing) True
       -- unsafePerformIO.putStrLn $ show newMod
       res <- findFuncs fileName datName newMod pnames newPn newPNT numParam oldPnames position inf xs modName
-      
+
    --   res2 <- findPatterns ses datName res pnames newPn newPNT numParam oldPnames position inf xs
-      
+
       return res
-      
+
 getPNs (Dec (HsFunBind _ (m:ms) ))
  = checkMatch (m:ms)
     where checkMatch [] = []
           checkMatch ((HsMatch _ _ (p:ps) _ _):ms)
             | (getPN p) /= defaultPN = (getPN p) : checkMatch ms
             | otherwise = checkMatch ms
-            
+
 getPNPats (Exp (HsCase e pats))
  = checkAlt pats
     where checkAlt [] = []
           checkAlt ((HsAlt loc p e2 ds):ps)
             | p /= (Pat HsPWildCard) = (getPN p) : checkAlt ps
-            | otherwise = checkAlt ps 
-            
-getPN p 
+            | otherwise = checkAlt ps
+
+getPN p
  = fromMaybe (defaultPN)
              (applyTU (once_tdTU (failTU `adhocTU` inPat)) p)
-             
+
     where
       inPat (pat::PName)
        = Just pat
       -- inPat _ = Nothing
- 
+
 findPosBefore newPN [] = []
 findPosBefore newPN (x:[]) = [x]
 findPosBefore newPN (x:y:ys)
@@ -351,27 +351,27 @@ findPosBefore newPN (x:y:ys)
 findFuncs fileName datName t pnames newPn newPNT numParam oldPnames position inf (x:xs) modName
   =  applyTP (stop_tdTP (failTP `adhocTP` inFun)) t
     where
-    inFun dec1 
+    inFun dec1
         = do
             (pat, exp1) <- findCase dec1 modName
             if pat /= False
-             then do 
+             then do
                     let altPNs = getPNPats exp1
                     if oldPnames /= altPNs
                      then do
                       let posBefore = findPosBefore newPn pnames
                       update exp1 (newPat3 exp1 (head posBefore)) dec1
                      else do
-                      update exp1 (newPat2 exp1) dec1    
-        
-             else 
+                      update exp1 (newPat2 exp1) dec1
+
+             else
               do ((match,arity), patar) <- findFun dec1 modName
-                 if match == False 
+                 if match == False
                    then do  --error "not found"
                        fail ""
-                   else 
+                   else
                      do  let funPNs = getPNs dec1
-                         if oldPnames /= funPNs 
+                         if oldPnames /= funPNs
                            then do
                             let posBefore = findPosBefore newPn pnames
                             if length posBefore > 1
@@ -383,17 +383,17 @@ findFuncs fileName datName t pnames newPn newPNT numParam oldPnames position inf
                            update dec1 (newMatch2 dec1 arity patar) dec1
                        where
                         newMatch (Dec (HsFunBind loc1 matches@((HsMatch _ pnt p e ds):ms)))  arity patar
-                          =  Dec (HsFunBind loc1 (newMatches matches pnt arity patar (length p)))  
-                          
+                          =  Dec (HsFunBind loc1 (newMatches matches pnt arity patar (length p)))
+
                         newMatch2 (Dec (HsFunBind loc1 matches@((HsMatch _ pnt p e ds):ms) )) arity patar
                           = Dec (HsFunBind loc1 (fst ++ (newMatch' pnt arity patar(length p)) ++ snd) )
-                            where 
+                            where
                               (fst, snd) = splitAt position matches
-                              
+
                         newMatch3 (Dec (HsFunBind loc1 matches@((HsMatch _ pnt p e ds):ms))) posBefore arity patar
                           = Dec (HsFunBind loc1 (newMatches' matches pnt posBefore arity patar (length p)))
-                                       
-                                                                         
+
+
                         newMatches [] pnt position arity patar = newMatch' pnt position arity patar
                         newMatches (m@(HsMatch _ _ pats _ _):ms) pnt position arity patar
                          | or (map wildOrID pats) = (newMatch' pnt position arity patar) ++ (m : ms)
@@ -404,19 +404,19 @@ findFuncs fileName datName t pnames newPn newPNT numParam oldPnames position inf
                          | (getPN pats) == posBefore = m : ((newMatch' pnt position arity patar) ++ ms)
                          | or (map wildOrID pats) = (newMatch' pnt position arity patar) ++ (m : ms)
       --                   | (TiDecorate.Pat HsPWildCard) `elem` pats = (newMatch' pnt) ++ (m : ms)
-                         | otherwise      = m : (newMatches' ms pnt posBefore position arity patar)                                       
-                                       
+                         | otherwise      = m : (newMatches' ms pnt posBefore position arity patar)
+
                         newMatch' pnt arity  patar position
                   --       | numParam == 0  =  [HsMatch loc0 pnt [pNtoPat newPn] (HsBody (nameToExp ("added" ++ x))) []  ]
                           = createMatch arity ['a'..'z'] patar
                             where
-                              createMatch arity alpha patar 
+                              createMatch arity alpha patar
                                | elem 1 arity
                                    = (HsMatch loc0 pnt (createPat arity patar alpha) (HsBody (nameToExp ("added" ++ x))) []) : (createMatch (mutatearity arity) alpha patar)
                                | otherwise = []
 
                               mutatearity [] = []
-                              mutatearity (x:xs) 
+                              mutatearity (x:xs)
                                | x == 1 = 0 : xs
                                | otherwise = x : (mutatearity xs)
 
@@ -429,62 +429,62 @@ findFuncs fileName datName t pnames newPn newPNT numParam oldPnames position inf
                                     (_, res2) = splitAt numParam alpha
                                     conApps n = conApp y alpha n
                                     (_, res3) = splitAt ((myLength (conApps n)) * numParam -1) alpha
-                                    
+
                                     (_, res4') = splitAt ((myLength newPatt') ) alpha
                                     newPatt' = patt alpha
-                                    
-                                    patt alpha 
+
+                                    patt alpha
                                      | inf == False = (Pat (HsPParen (Pat (HsPApp newPNT (createNames numParam alpha))))::HsPatP)
                                      | otherwise    = (Pat (HsPInfixApp (nameToPat [alpha!!0]) newPNT (nameToPat [alpha!!1]))::HsPatP)
-                                     
+
                                     conApp xs alpha name
                                       = (Pat (HsPParen (Pat (HsPApp (nameToPNT name) (createPats xs alpha)))))
-                                      
+
                                     myLength (Pat (HsPParen (Pat (HsPApp _ xs)))) = length xs
-                                    myLength _ = 0  
-                                                                        
-                                    
-                                    createPats [] alpha = []  
+                                    myLength _ = 0
+
+
+                                    createPats [] alpha = []
                                     createPats (x:xs) alpha
                                      | x == 1 = newPatt : (createPats xs (res4))
                                      | otherwise = (createNames 1 alpha) ++ (createPats xs (tail alpha))
                                         where
                                          (_, res4) = splitAt ((myLength newPatt)) alpha
                                          newPatt = patt alpha
-                                    
+
                                     createNames 0 _ = []
                                     createNames count (x:xs)
                                      = (nameToPat [x]) : (createNames (count-1) xs)
-                                          
+
                         newPat (Exp (HsCase e pats@((HsAlt loc p e2 ds):ps)))
                           = Exp (HsCase e (newPats pats))
-                     
+
                         newPat2 (Exp (HsCase e pats))
                           = Exp (HsCase e (fst ++ newPat' ++ snd))
                              where
                               (fst, snd) = splitAt position pats
-                                       
- 
+
+
                         newPat3 (Exp (HsCase e pats)) posBefore
                           = Exp (HsCase e (newPats' pats posBefore))
-                     
+
                         newPats [] = newPat'
                         newPats(pa@(HsAlt _ p _ _):ps)
                          | wildOrID p = newPat' ++ (pa:ps)
                          | otherwise              = pa : (newPats ps)
-                     
+
                         newPats' [] posBefore = newPat'
                         newPats' (pa@(HsAlt _ p _ _):ps) posBefore
                          | (getPN p) == posBefore = pa : (newPat' ++ ps)
                          | wildOrID p = newPat' ++ (pa:ps)
                          | otherwise = pa : (newPats' ps posBefore)
 
-                     
-                        newPat' 
+
+                        newPat'
                          | numParam == 0 = [HsAlt loc0 (pNtoPat newPn) (HsBody (nameToExp ("added" ++ x))) [] ]
                          | otherwise = [HsAlt loc0 patt (HsBody (nameToExp ("added" ++ x))) []]
                             where
-                             patt 
+                             patt
                               | inf == False = (Pat (HsPParen (Pat (HsPApp newPNT  (createNames numParam ['a'..'z']))))::HsPatP)
                               | otherwise    = (Pat (HsPInfixApp (nameToPat "a") newPNT (nameToPat "b"))::HsPatP)
 
@@ -496,7 +496,7 @@ findFuncs fileName datName t pnames newPn newPNT numParam oldPnames position inf
       --and the function only takes 1 parameter
     findFun dec@(Dec (HsFunBind loc matches)::HsDeclP) modName
         =  return $ findMatch matches
-           where findMatch match 
+           where findMatch match
                    = fromMaybe ((False, []), [([], "")])
                       (applyTU (once_tdTU (failTU `adhocTU` inMatch)) match)
                  inMatch (mat@(HsMatch loc1  pnt pats (HsBody e) ds)::HsMatchP)
@@ -507,16 +507,16 @@ findFuncs fileName datName t pnames newPn newPNT numParam oldPnames position inf
                  inMatch x@(_) = Nothing
 
     findFun a@(_) _ = return ((False, []), [([], "")])
-      
+
     findCase dec@(Dec (HsFunBind loc matches)::HsDeclP) modName
         = return (findExp matches)
            where findExp alt
                   = fromMaybe ((False, defaultExp))
                      (applyTU (once_tdTU (failTU `adhocTU` inExp)) alt)
                  inExp (exp@(Exp e)::HsExpP)
-                  = Just ((findPat e), exp)  
-                  
-                  where                      
+                  = Just ((findPat e), exp)
+
+                  where
                    findPat alt
                     = fromMaybe (False)
                       (applyTU (once_tdTU (failTU `adhocTU` inPat)) alt)
@@ -533,15 +533,15 @@ findFuncs fileName datName t pnames newPn newPNT numParam oldPnames position inf
                                                                  let y = definingDecls [(pNTtoPN x)] decs False True
                                                                  -- error $ show y
                                                                  if length y /= 0
-                                                                  then do 
+                                                                  then do
                                                                    let b = definedPNs (head y)
                                                                    Just (checkTypes datName (pNtoName (head b)) modName fileName)
                                                                   else  Nothing
                           _ -> Nothing
-                   -- inPat e = error (show e) -- Nothing   
-                 -- inExp _ = Nothing           
+                   -- inPat e = error (show e) -- Nothing
+                 -- inExp _ = Nothing
     findCase pat@(_) _ =  return (False, defaultExp)
-flatternPat :: HsPatP -> [HsPatP] 
+flatternPat :: HsPatP -> [HsPatP]
 flatternPat (Pat (HsPAsPat i p)) = flatternPat p
 flatternPat (Pat (HsPApp i p)) = (Pat (HsPId (HsCon i))) : (concatMap flatternPat p)
 flatternPat (Pat (HsPTuple _ p)) = p
@@ -549,7 +549,7 @@ flatternPat (Pat (HsPList _ p)) = p
 flatternPat (Pat (HsPInfixApp p1 i p2)) = (flatternPat p1) ++ (flatternPat p2)
 flatternPat (Pat (HsPParen p)) = flatternPat p
 flatternPat p@(Pat (HsPId i)) = [p]
-flatternPat p = [p] 
+flatternPat p = [p]
 
 wildOrID (Pat HsPWildCard) = True
 wildOrID (Pat (HsPId (HsVar x))) = True
@@ -557,29 +557,29 @@ wildOrID _ = False
 
 doFileStuff fileName r c a = do
     s <- AbstractIO.readFile fileName
-    
+
     -- get the first half of the file (up to point user has selected)
     let rev = reverse (returnHalf r c (1,1) s)
     let rest = returnSndHalf r c (1,1) s
     let str = parseIt rest a
-    let str' = parseIt' rest a       
-    let len = length (myDiff s str')    
+    let str' = parseIt' rest a
+    let len = length (myDiff s str')
     let (st, fin) = splitAt len s
-    let new = st ++ str ++ fin   
+    let new = st ++ str ++ fin
     let extraCol = parseTick 0 str
     let (col, row) = getRowCol r c (1,1) st
-          
-    -- Check that the file does not already exist first         
+
+    -- Check that the file does not already exist first
     -- or else it will lead into strange errors...
     AbstractIO.catch (AbstractIO.writeFile (fileName ++ ".temp.hs") new)
                       (\_ -> do AbstractIO.removeFile (fileName ++ ".temp.hs")
                                 AbstractIO.writeFile (fileName ++ ".temp.hs") new)
-    
-    if '`' `elem` a 
+
+    if '`' `elem` a
       then do return (new, col + extraCol, row, True)
       else do return (new, col + extraCol, row, False)
- 
--- function to parse to see if user is placing contructor at the beginning or end of statement...   
+
+-- function to parse to see if user is placing contructor at the beginning or end of statement...
 -- if the user has selected a ' ' or a character
 -- parse forwards (which is really backwards) until a '|' or a '=' character is found
 parseTick _ [] = 3
@@ -590,17 +590,17 @@ parseTick count (x:xs)
 
 myDiff :: String -> String -> String
 myDiff [] _ = []
-myDiff (y:ys) (x:xs) 
+myDiff (y:ys) (x:xs)
  | (y:ys) == (x:xs) = ""
  | otherwise = y : (myDiff ys (x:xs))
- 
+
 parseIt :: String -> String -> String
 parseIt "" str = error "Please select a position on the right hand side of the data type."
-parseIt (x:xs) str 
+parseIt (x:xs) str
  | x == '\n' || x == '|' = " | " ++ str ++ " "
  | x /= '\n' || x /= '|' = parseIt xs str
  | otherwise            = " | " ++ str ++ " "
- 
+
 parseIt' :: String -> String -> String
 parseIt' "" str = ""
 parseIt' (x:xs) str
@@ -608,9 +608,9 @@ parseIt' (x:xs) str
  | x /= '\n' || x /= '|' = parseIt' xs str
  | otherwise             = (x:xs)
 
-                                 
+
 -- perform some primitve parsing. We need to check where abouts the user wants
--- to add the data structure: 
+-- to add the data structure:
 -- a) if the it is at the beginning - we need to check that the
 --    use has selected at the end of a "=" sign -- if this is the case append "|" to the end
 --    of the user string;
@@ -621,21 +621,21 @@ parseIt' (x:xs) str
 
 -- function to return the half of the file that comes before the user position
 returnHalf r c (col, row) "" = ""
-returnHalf r c (col, row) (x:xs) 
+returnHalf r c (col, row) (x:xs)
   | x == '\n' = if (r == row) && (c == col)   then [x]
                                               else x : (returnHalf r c (1, row+1) xs)
   | otherwise = if c == col && (r == row)     then [x]
                                               else x : (returnHalf r c (col+1, row) xs)
-                                              
+
 returnSndHalf r c (col, row) "" = ""
-returnSndHalf r c (col, row) (x:xs) 
+returnSndHalf r c (col, row) (x:xs)
   | x == '\n' = if (r == row) && (c == col)   then xs
                                               else (returnSndHalf r c (1, row+1) xs)
   | otherwise = if c == col && (r == row)     then xs
-                                              else (returnSndHalf r c (col+1, row) xs)                                       
-                                           
+                                              else (returnSndHalf r c (col+1, row) xs)
+
 getRowCol r c (col, row) "" = (col, row)
-getRowCol r c (col, row) (x:xs) 
+getRowCol r c (col, row) (x:xs)
  | x == '\n' = getRowCol r c (1, row+1) xs
  | otherwise = getRowCol r c (col+1, row) xs
 
@@ -644,10 +644,10 @@ getRowCol r c (col, row) (x:xs)
 Takes the position of the highlighted code and returns
 the function name, the list of arguments, the expression that has been
 highlighted by the user, and any where\/let clauses associated with the
-function. 
+function.
 -}
 
-findDefNameAndExp :: Term t => [PosToken] -- ^ The token stream for the 
+findDefNameAndExp :: Term t => [PosToken] -- ^ The token stream for the
                                           -- file to be
                                           -- refactored.
                   -> (Int, Int) -- ^ The beginning position of the highlighting.
@@ -657,19 +657,19 @@ findDefNameAndExp :: Term t => [PosToken] -- ^ The token stream for the
                      -- (the function name, the list of arguments,
                      -- the expression highlighted, any where\/let clauses
                      -- associated with the function).
-                     
+
 findDefNameAndExp toks beginPos endPos t
   = fromMaybe ([])
               (applyTU (once_tdTU (failTU `adhocTU` inData)) t)
     where
       --The selected sub-expression is the rhs of a data type
       inData (dat@(HsConDecl loc1 is con i xs)::HsConDeclP)
-       = error (show res) 
-            where 
+       = error (show res)
+            where
                res = pNtoExp (pNTtoPN i)
       inData _ = Nothing
 
 
 
-                    
+
 

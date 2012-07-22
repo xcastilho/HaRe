@@ -21,19 +21,19 @@ import PrettyPrint
 import PrettyPrint
 import PosSyntax
 import AbstractIO
-import Maybe
+import Data.Maybe
 import TypedIds
 import UniqueNames hiding (srcLoc)
 import PNT
 import TiPNT
-import List
+import Data.List
 import RefacUtils hiding (getParams)
 import PFE0 (findFile)
 import MUtils (( # ))
 import RefacLocUtils
-import System
-import IO
-import Char
+-- import System
+import System.IO
+import Data.Char
 
 refacAddField args
   = do

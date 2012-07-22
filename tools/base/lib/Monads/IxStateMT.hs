@@ -4,7 +4,7 @@ module IxStateMT (HasState(..), MT, at, Z, S, Top, Under,
 import MT
 import Control_Monad_Fix
 
-import Monad(liftM,MonadPlus(..))
+import Control.Monad(liftM,MonadPlus(..))
 
 
 newtype WithState s m a = S { ($$) :: s -> m (a,s) }

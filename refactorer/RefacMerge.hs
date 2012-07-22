@@ -22,12 +22,12 @@ import RefacLocUtils
 import Data.Char
 import GHC.Unicode
 import AbstractIO
-import Maybe
-import List
+import Data.Maybe
+import Data.List
 import RefacUtils
 import RefacRedunDec
 import SlicingUtils
-import Directory
+-- import Directory
 import LocalSettings
 
 data FunEntity = Guard [HsPatP] [(SrcLoc, HsExpP, HsExpP)] [HsDeclP] PNT | Match [HsPatP] HsExpP [HsDeclP] PNT | Null

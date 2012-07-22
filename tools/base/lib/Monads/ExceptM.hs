@@ -3,7 +3,7 @@ module ExceptM (module ExceptM, HasExcept(..)) where
 import MT
 import Control_Monad_Fix
 
-import Monad (liftM)
+import Control.Monad (liftM)
 
 {- use newtype to avoid conflicts with class instances! -}
 newtype ExceptM l r      = ExceptM {removeExcept :: Either l r}
@@ -35,18 +35,18 @@ instance Monad (ExceptM x) where
 
   ExceptM (Right _) >> m  = m
   ExceptM (Left x) >> m   = ExceptM (Left x)
-    
+
 
 instance HasExcept (ExceptM x) x where
   raise               = ExceptM . Left
   handle h (ExceptM (Left x))   = h x
   handle h (ExceptM (Right x))  = ExceptM (Right x)
-  
+
 
 instance MonadFix (ExceptM x) where
   mfix f              = let a = f (unRight a) in a
 
 instance HasBaseMonad (ExceptM x) (ExceptM x) where
-  inBase              = id    
+  inBase              = id
 
 

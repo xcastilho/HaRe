@@ -1,6 +1,6 @@
 module Vim.EditorFunctions where
 
-import Char(toUpper)
+import Data.Char(toUpper)
 import GenEditorInterfacesAux
 
 editor = Editor {
