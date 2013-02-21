@@ -39,6 +39,7 @@ import GHC.Paths ( libdir )
 import Language.Haskell.Refact.Utils
 import Language.Haskell.Refact.Utils.LocUtils
 import Language.Haskell.Refact.Utils.Monad
+import Language.Haskell.Refact.Utils.TokenUtils
 import Language.Haskell.Refact.Utils.TypeUtils
 import qualified Language.Haskell.Refact.Case as GhcRefacCase
 import qualified Language.Haskell.Refact.SwapArgs as GhcSwapArgs
@@ -61,9 +62,12 @@ import Language.Haskell.Refact.Utils.GhcUtils
 -- targetMod = "FreeAndDeclared/Declare"
 
 --targetFile = "../test/testdata/" ++ targetMod ++ ".hs"
-targetFile = "./" ++ targetMod ++ ".hs"
+
+targetFile = "./test/testdata/TypeUtils/" ++ targetMod ++ ".hs"
+--targetFile = "./" ++ targetMod ++ ".hs"
 -- targetMod = "SwapArgs/B"
-targetMod = "Ole"
+-- targetMod = "Ole"
+targetMod = "Empty"
 
 {- main = t1 -}
 
@@ -78,13 +82,13 @@ s2 = GhcSwapArgs.swapArgs ["./old/refactorer/B.hs","6","1"]
 -}
 
 -- added by Chris for renaming
-r1 = GhcRefacRename.rename ["./Ole.hs", "cas", "18", "1"]  -- lambda
-r2 = GhcRefacRename.rename ["./Ole.hs", "newBlah", "22", "16"] -- case of
-r3 = GhcRefacRename.rename ["./Ole.hs", "newBlah", "26", "19"] -- if else / par
-r4 = GhcRefacRename.rename ["./Ole.hs", "newBlah", "29", "12"] -- pattern binding
-r5 = GhcRefacRename.rename ["./Ole.hs", "newBlah", "14", "19"] -- let
-r6 = GhcRefacRename.rename ["./Ole.hs", "newBlah", "33", "14"] -- where clause
-
+r1 = GhcRefacRename.rename ["./Ole.hs", "Cas", "18", "1"]  -- lambda
+r2 = GhcRefacRename.rename ["./Ole.hs", "j", "21", "1"] -- case of
+r3 = GhcRefacRename.rename ["./Ole.hs", "x", "26", "19"] -- if else / par
+r4 = GhcRefacRename.rename ["./Ole.hs", "kkk", "30", "1"] -- pattern binding
+r5 = GhcRefacRename.rename ["./Ole.hs", "bob", "14", "15"] -- let
+r6 = GhcRefacRename.rename ["./Ole.hs", "a", "33", "1"] -- where clause
+r7 = GhcRefacRename.rename ["./Ole.hs", "newBlah", "38", "6"] -- data declaration
 
 p1 = 
   do
@@ -152,7 +156,8 @@ getStuff =
         -- modSum <- GHC.getModSummary $ GHC.mkModuleName "B"
         -- modSum <- GHC.getModSummary $ GHC.mkModuleName "FreeAndDeclared.Declare"
         -- modSum <- GHC.getModSummary $ GHC.mkModuleName "SwapArgs.B"
-        modSum <- GHC.getModSummary $ GHC.mkModuleName "Ole"
+        -- modSum <- GHC.getModSummary $ GHC.mkModuleName "Ole"
+        modSum <- GHC.getModSummary $ GHC.mkModuleName targetMod
         p <- GHC.parseModule modSum
 
         t <- GHC.typecheckModule p
@@ -224,11 +229,11 @@ getStuff =
         -- GHC.liftIO (putStrLn $ "\nparsedSource(showData)=" ++ (SYB.showData SYB.Parser 0 $ GHC.pm_parsed_source p))
 
         -- RenamedSource -----------------------------------------------
-        -- GHC.liftIO (putStrLn $ "renamedSource(Ppr)=" ++ (GHC.showPpr $ GHC.tm_renamed_source t))
-        -- GHC.liftIO (putStrLn $ "\nrenamedSource(showData)=" ++ (SYB.showData SYB.Renamer 0 $ GHC.tm_renamed_source t))
+        GHC.liftIO (putStrLn $ "renamedSource(Ppr)=" ++ (GHC.showPpr $ GHC.tm_renamed_source t))
+        GHC.liftIO (putStrLn $ "\nrenamedSource(showData)=" ++ (SYB.showData SYB.Renamer 0 $ GHC.tm_renamed_source t))
 
-        GHC.liftIO (putStrLn $ "typeCheckedSource=" ++ (GHC.showPpr $ GHC.tm_typechecked_source t))
-        GHC.liftIO (putStrLn $ "typeCheckedSource=" ++ (SYB.showData SYB.TypeChecker 0 $ GHC.tm_typechecked_source t))
+        -- GHC.liftIO (putStrLn $ "typeCheckedSource=" ++ (GHC.showPpr $ GHC.tm_typechecked_source t))
+        -- GHC.liftIO (putStrLn $ "typeCheckedSource=" ++ (SYB.showData SYB.TypeChecker 0 $ GHC.tm_typechecked_source t))
 
         -- ModuleInfo ----------------------------------------------------------------
         -- GHC.liftIO (putStrLn $ "moduleInfo.TyThings=" ++ (SYB.showData SYB.Parser 0 $ GHC.modInfoTyThings $ GHC.tm_checked_module_info t))

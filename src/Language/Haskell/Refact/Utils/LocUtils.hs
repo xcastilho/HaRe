@@ -7,9 +7,9 @@ module Language.Haskell.Refact.Utils.LocUtils(
                      , simpPos0
                      -- , emptyList, nonEmptyList
                      -- , showToks
-                     , tokenLen
+                     -- , tokenLen
                      -- ,lengthOfToks
-                     , mkToken {-,defaultToken-},newLnToken{-,whiteSpacesToken -},whiteSpaceTokens
+                     , mkToken, mkZeroToken {-,defaultToken, whiteSpacesToken -},whiteSpaceTokens
                      , realSrcLocFromTok
                      , isWhite
                      , notWhite
@@ -24,9 +24,9 @@ module Language.Haskell.Refact.Utils.LocUtils(
                      lastNonSpaceToken,firstNonSpaceToken -} ,compressPreNewLns,compressEndNewLns
 
                      , lengthOfLastLine
-                     , updateToks, updateToksWithPos, updateToksList
+                     , updateToks, updateToksWithPos
                      , getToks
-                     , replaceToks,deleteToks,doRmWhites -- ,doAddWhites
+                     , replaceToks,replaceTok,deleteToks,doRmWhites -- ,doAddWhites
                      , srcLocs
                      , getSrcSpan, getAllSrcLocs
                      -- , ghcSrcLocs -- Test version
@@ -45,17 +45,18 @@ module Language.Haskell.Refact.Utils.LocUtils(
                      StartEndLoc, isArrow,-- swapInToks,
                      commentToks
                      -}
-                     , reAlignToks
+                     -- , reAlignToks
                      , tokenise
+                     , basicTokenise
                      , lexStringToRichTokens
                      , prettyprint
                      , prettyprintPatList
-                     , groupTokensByLine
+                     -- , groupTokensByLine
                      , addLocInfo
-                     , getIndentOffset
+                     -- , getIndentOffset
                      , getLineOffset
-                     , splitToks
-                     , splitOnNewLn
+                     -- , splitToks
+                     -- , splitOnNewLn
                      {-
                      , insertComments,
                      extractComments, insertTerms
@@ -82,7 +83,7 @@ import qualified GHC.SYB.Utils as SYB
 
 import Language.Haskell.Refact.Utils.GhcUtils
 import Language.Haskell.Refact.Utils.Monad
-import Language.Haskell.Refact.Utils.MonadUtils
+import Language.Haskell.Refact.Utils.MonadFunctions
 import Language.Haskell.Refact.Utils.TokenUtils
 import Language.Haskell.Refact.Utils.TypeSyn
 
@@ -143,11 +144,6 @@ extractComments ((startPosl, startPosr), endPos) toks
 ------------------------------------------------
 -}
 
-tokenLen (_,s)     = length s   --check this again! need to handle the tab key.
-{-
-lengthOfToks::[PosToken]->Int
-lengthOfToks=length.(concatMap tokenCon)
--}
 --Some functions for checking whether a token is of a specific type of token.
 
 
@@ -273,24 +269,6 @@ hasNewLn (GHC.L l _,_) = case l of
   GHC.RealSrcSpan ss -> (GHC.srcSpanStartLine ss /= GHC.srcSpanEndLine ss)
   _ -> False
 
-onSameLn :: PosToken -> PosToken -> Bool
-onSameLn (GHC.L l1 _,_) (GHC.L l2 _,_) = r1 == r2
-  where
-    (r1,_) = getGhcLoc l1
-    (r2,_) = getGhcLoc l2
-
-splitOnNewLn :: [PosToken] -> ([PosToken],[PosToken])
-splitOnNewLn xs = go [] xs
-  -- ++AZ++ : TODO: is this simpler? : (toks1,toks2)=break (\x' -> tokenRow x /= tokenRow x') rtoks
-
-  where
-    go [] [] = ([],[])
-    go ss [] = (ss,[])
-    go [] xs = go [head xs] (tail xs)
-    go ss xs 
-      | onSameLn (glast "splitOnNewLn" ss) (head xs) = go (ss ++ [head xs]) (tail xs)
-      | otherwise = (ss,xs)
-
 
 {-
 --Returns True if a token stream starts with a newline token (apart from the white spaces tokens)
@@ -363,28 +341,14 @@ mkToken t (row,col) c = ((GHC.L l t),c)
     l = GHC.mkSrcSpan (GHC.mkSrcLoc filename row col) (GHC.mkSrcLoc filename row (col + (length c) ))
 
 
+mkZeroToken :: PosToken
+mkZeroToken = mkToken GHC.ITsemi (0,0) ""
 
 ---Restriction: the refactorer should not modify refactorer-modified/created tokens.
 defaultToken :: PosToken
 defaultToken = (GHC.noLoc (GHC.ITlineComment "defaultToken"), "defaultToken")
 
 -- defaultToken = (Whitespace, (pos0," "))
-
-{-
-newLnToken   = (Whitespace, (pos0,"\n"))
--}
-newLnToken :: PosToken -> PosToken
-newLnToken (GHC.L l _,_) = (GHC.L l' GHC.ITvocurly,"")
--- newLnToken (GHC.L l _,_) = (GHC.L l' GHC.ITvocurly,"NL")
-  where
-   l' =  case l of
-     GHC.RealSrcSpan ss ->
-       let
-         loc = GHC.mkSrcLoc (GHC.srcSpanFile ss) (1 + GHC.srcSpanEndLine ss) 1
-         -- loc = GHC.mkSrcLoc (GHC.srcSpanFile ss) (1 + GHC.srcSpanEndLine ss) 0
-       in
-         GHC.mkSrcSpan loc loc
-     _ -> l
 
 
 ghcSpan0 = GHC.mkSrcSpan ghcPos0 ghcPos0
@@ -425,7 +389,7 @@ replaceTabBySpaces (s:ss)
 -- required
 -- TODO: replace 'colOffset withFirstLineIndent' with a Maybe Int ++AZ++
 tokenise :: GHC.RealSrcLoc -> Int -> Bool -> String -> IO [PosToken]
-tokenise  startPos _ _ [] = return []
+tokenise  _ _ _ [] = return []
 tokenise  startPos colOffset withFirstLineIndent str
   = let str' = case lines str of
                     (ln:[]) -> addIndent ln ++ if glast "tokenise" str=='\n' then "\n" else ""
@@ -442,24 +406,17 @@ tokenise  startPos colOffset withFirstLineIndent str
      addIndent ln = if withFirstLineIndent
                       then replicate colOffset ' '++ ln
                       else ln
-
-     {- ++AZ++ removed for now. Needed? NOPE
-     --preprocssing the token stream to expand the white spaces to individual tokens.
-     expandNewLnTokens::[PosToken]->[PosToken]
-     expandNewLnTokens ts = concatMap expand ts
-       where
-        expand tok@(Whitespace,(pos,s)) = doExpanding pos s
-        expand x = [x]
-
-        doExpanding pos [] =[]
-        doExpanding pos@(Pos c row col) (t:ts)
-          = case t of
-             '\n'  -> (Whitespace, (pos,[t])):(doExpanding (Pos c (row+1) 1) ts)
-             _     -> (Whitespace, (pos,[t])):(doExpanding (Pos c row (col+1)) ts)
-     -}
-
+ 
 -- ---------------------------------------------------------------------
 
+-- |Convert a string into a set of Haskell tokens. It has default
+-- position and offset, since it will be stitched into place in TokenUtils
+basicTokenise :: String -> IO [PosToken]
+basicTokenise str = tokenise startPos 0 False str
+  where
+    startPos = (GHC.mkRealSrcLoc (GHC.mkFastString "foo") 0 1)
+
+-- ---------------------------------------------------------------------
 
 lexStringToRichTokens :: GHC.RealSrcLoc -> String -> IO [PosToken]
 lexStringToRichTokens startLoc str = do
@@ -469,44 +426,22 @@ lexStringToRichTokens startLoc str = do
       dflags <- GHC.getSessionDynFlags
       let dflags' = foldl GHC.xopt_set dflags
                     [GHC.Opt_Cpp, GHC.Opt_ImplicitPrelude, GHC.Opt_MagicHash]
-      GHC.setSessionDynFlags dflags'
+      _ <- GHC.setSessionDynFlags dflags'
 
       -- lexTokenStream :: StringBuffer -> RealSrcLoc -> DynFlags -> ParseResult [Located Token]
       let res = GHC.lexTokenStream (GHC.stringToStringBuffer str) startLoc dflags'
       case res of
         GHC.POk _ toks -> return $ GHC.addSourceToTokens startLoc (GHC.stringToStringBuffer str) toks 
-        GHC.PFailed _srcSpan msg -> error $ "lexStringToRichTokens:" -- ++ (show $ GHC.ppr msg)
+        GHC.PFailed _srcSpan _msg -> error $ "lexStringToRichTokens:" -- ++ (show $ GHC.ppr msg)
 
         -- addSourceToTokens :: RealSrcLoc -> StringBuffer -> [Located Token] -> [(Located Token, String)]
 
 -- ---------------------------------------------------------------------
 
-groupTokensByLine :: [PosToken] -> [[PosToken]]
-groupTokensByLine [] = []
-groupTokensByLine (xs) = let x = head xs
-                             (xs', xs'') = break (\x' -> tokenRow x /= tokenRow x') xs
-                      in case xs'' of
-                        [] -> [xs']
-                        _ ->  (xs'++ [ghead "groupTokensByLine" xs''])
-                                : groupTokensByLine (gtail "groupTokensByLine" xs'')
-                      -- in if xs''==[] then [xs']
-                      --     else (xs'++ [ghead "groupTokensByLine" xs''])
-                      --           : groupTokensByLine (gtail "groupTokensByLine" xs'')
-
-{- Old
-groupTokensByLine [] = []
-groupTokensByLine xs =let (xs', xs'') = break hasNewLn xs
-                      in if xs''==[] then [xs']
-                          else (xs'++ [ghead "groupTokensByLine" xs''])
-                                : groupTokensByLine (gtail "groupTokensByLine" xs'')
--}
-
--- ---------------------------------------------------------------------
-
 --Should add cases for literals.
-addLocInfo :: (GHC.LHsBind GHC.Name,[PosToken]) 
+addLocInfo :: (GHC.LHsBind GHC.Name,[PosToken])
            -> RefactGhc (GHC.LHsBind GHC.Name,[PosToken])
-addLocInfo (decl, toks) = return (decl, toks) 
+addLocInfo (decl, toks) = return (decl, toks)
   -- = error "undefined addLocInfo"
 {-++AZ++ Need to see it this is actually needed....
   --  = runStateT (applyTP (full_tdTP (idTP `adhocTP` inPnt
@@ -600,7 +535,7 @@ getToks (startPos,endPos) toks =
   -- error $ "getToks:startPos=" ++ (show startPos) ++ ",endPos=" ++ (show endPos) ++ ",toks=" ++ (showToks toks) -- ++AZ++ debug
   let (_,toks2)        = break (\t -> tokenPos t >= startPos) toks
       (toks21,_toks22) = break (\t -> tokenPos t >  endPos) toks2
-  in 
+  in
     (toks21)   -- Should add error message for empty list?
     -- error $ "getToks:startPos=" ++ (show startPos) ++ ",endPos=" ++ (show endPos) ++ ",toks21=" ++ (showToks toks21) -- ++AZ++ debug
 
@@ -621,68 +556,16 @@ updateToks oldAST newAST printFun addTrailingNl
 
 updateToksWithPos :: (SYB.Data t)
   => (SimpPos, SimpPos) -- ^Start and end pos of old element
-  -> t -- ^ New element
+  -> t             -- ^ New element
   -> (t -> [Char]) -- ^ pretty printer
-  -> Bool         -- ^ Add trailing newline if required
-  -> RefactGhc () -- ^ Updates the RefactState
+  -> Bool          -- ^ Add trailing newline if required
+  -> RefactGhc ()  -- ^ Updates the RefactState
 updateToksWithPos (startPos,endPos) newAST printFun addTrailingNl
   = do
-       -- error $ show (startPos, endPos) -- ++AZ++
-       toks <- fetchToks
-
-       let (toks1, middle, toks2)  = splitToks (startPos, endPos) toks
-           astStr = (printFun newAST) 
-
-       let startTok = if (emptyList middle) 
-                       then glast "updateToksWithPos" toks1
-                       else ghead "UpdateToksWithPos" middle
-       -- error $ "updateToks:astStr=[" ++ (show (astStr)) ++ "]" -- ++AZ++
-       -- error $ "updateToks:(head toks2,(tokenRow (head toks2), tokenRow (head newToks))
-       -- newToks <- liftIO $ tokenise (realSrcLocEndTok $ glast "Update Toks" toks1) 1 True astStr
-       newToks <- liftIO $ tokenise (realSrcLocEndTok startTok) 1 True astStr
-
-       {-
-       let nlt1 = newLnToken (glast "updateToks 3" newToks)
-           nlt2 = newLnToken nlt1
-       let newToks' = if (addTrailingNl && tokenRow (ghead "updateToks 1" toks2) <= tokenRow (glast "updateToks 2" newToks))
-                       then newToks ++ [nlt1,nlt2]
-                       else newToks
-       let toks' = toks1 ++ newToks' ++ toks2
-       putToks toks' modified
-       -}
+       newToks <- liftIO $ basicTokenise (printFun newAST)
        putToksForPos (startPos,endPos) newToks
 
        return ()
-
--- ---------------------------------------------------------------------
-
-updateToksList :: (SYB.Data t)
-  => GHC.GenLocated GHC.SrcSpan t -- ^ Old element
-  -> GHC.GenLocated GHC.SrcSpan t -- ^ New element
-  -> (GHC.GenLocated GHC.SrcSpan t -> [Char]) -- ^ pretty printer
-  -> RefactGhc (GHC.GenLocated GHC.SrcSpan t, [PosToken]) -- ^ Updated element and toks
-  -- -> RefactGhc () -- ^ Updates the RefactState
-updateToksList oldAST newAST printFun
-   = trace "updateToksList" $
-     do -- (RefSt s u toks _) <- get
-        toks <- fetchToks
-        let offset                        = lengthOfLastLine toks1
-            (toks1,toks2az, toks3az)      = splitToks (startPos, endPos) toks
-            (startPos, endPos)            = getStartEndLoc2 toks [oldAST]
-        newToks <- liftIO $ tokenise (GHC.mkRealSrcLoc (GHC.mkFastString "foo") 0 0) offset False $ printFun newAST  -- TODO: set filename as per loc in oldAST
-        -- error (GHC.showRichTokenStream newToks)
-        -- error ("updateToksList:" ++ (showToks toks1) ++ "\n" ++ (showToks newToks))
-        -- error ("updateToksList:" ++ (showToks toks1) ++ "\n" ++ (showToks toks2az) ++ "\n" ++ (showToks toks3az))
-        -- error ("updateToksList:" ++ (showToks newToks))
-
-        {-
-        let
-            toks' = replaceToks toks startPos endPos newToks
-        putToks toks' modified
-        -}
-        putToksForPos (startPos,endPos) newToks
-
-        return (newAST, newToks)
 
 -- ---------------------------------------------------------------------
 
@@ -691,48 +574,14 @@ updateToksList oldAST newAST printFun
 addFormalParams :: (SYB.Data t, SYB.Typeable t) =>
                 t -> [GHC.Located (GHC.Pat GHC.Name)] -> RefactGhc ()
 addFormalParams t newParams
-  = do toks <- fetchToks
+  = do
        let (startPos,endPos) = getStartEndLoc t
-           tToks     = getToks (startPos, endPos) toks
-           (toks1, _) = let (toks1', toks2') = break (\t-> tokenPos t >= endPos) toks
-                        -- in (toks1' ++ [ghead "addFormalParams" toks2'], gtail "addFormalParams"  toks2')
-                        in (toks1',toks2')
-           offset  = lengthOfLastLine toks1
-           ((GHC.L l _),_) = (last toks1)
 
-           (r,c) = getGhcLocEnd l
-           -- newToks = tokenise (Pos 0 v1 1) offset False (prettyprintPatList True newParams )
-       -- error ("addFormalParams: (last toks1)=" ++ (showToks toks1)) -- ++AZ++ debug
-       -- error ("addFormalParams: (pp thing)=" ++ (GHC.showPpr (GHC.mkRealSrcLoc (GHC.mkFastString "foo") r (c+1)))) -- ++AZ++ debug
-       -- error ("addFormalParams: (startPos,endPos)=" ++ (show (startPos,endPos))) -- ++AZ++ debug
-       newToks <- liftIO $ tokenise (GHC.mkRealSrcLoc (GHC.mkFastString "foo") r (c+1)) 0 False 
-                                    (prettyprintPatList prettyprint True newParams)
-
-       {-
-       let toks' = replaceToks toks startPos endPos (tToks++newToks)
-           toks'' = reAlignToks toks' -- ++AZ++ TODO: reduce the scope of the re-align, expensive
-       putToks toks'' modified
-       -}
-       putToksForPos (startPos,endPos) (tToks++newToks)
-       -- addLocInfo (newParams, newToks)
-
+       newToks <- liftIO $ basicTokenise (prettyprintPatList prettyprint True newParams)
+       -- error $ "addFormalParams:newToks=" ++ (showToks newToks) -- ++AZ++
+       _ <- putToksAfterPos (startPos,endPos) PlaceAdjacent $ map markToken newToks
 
        return ()
-
-{- ++AZ++ original
----REFACTORING: GENERALISE THIS FUNCTION.
-addFormalParams t newParams
-  = do ((toks,_),(v1, v2))<-get
-       let (startPos,endPos) = getStartEndLoc toks t
-           tToks     = getToks (startPos, endPos) toks
-           (toks1, _) = let (toks1', toks2') = break (\t-> tokenPos t == endPos) toks
-                        in (toks1' ++ [ghead "addFormalParams" toks2'], gtail "addFormalParams"  toks2')
-           offset  = lengthOfLastLine toks1
-           newToks = tokenise (Pos 0 v1 1) offset False (prettyprintPatList True newParams )
-           toks'   = replaceToks toks startPos endPos (tToks++newToks)
-       put ((toks',modified), ((tokenRow (glast "addFormalParams" newToks) -10), v2))
-       addLocInfo (newParams, newToks)
--}
 
 -- ---------------------------------------------------------------------
 
@@ -741,38 +590,43 @@ addFormalParams t newParams
 -- the start and end positions really exist in the token stream.
 -- QN: what happens if the start or end position does not exist?
 
+-- TODO: ++AZ++ pretty sure this should be deprecated
 replaceToks::[PosToken]->SimpPos->SimpPos->[PosToken]->[PosToken]
 replaceToks toks startPos endPos newToks =
  -- error $ "replaceToks: startPos=" ++ (show startPos)
     (if length toks22 == 0
-        then toks1 ++ newToks
+        then toks1 ++ newToks'
         else let {-(pos::(Int,Int)) = tokenPos (ghead "replaceToks" toks22)-} -- JULIEN
                  oldOffset = {-getOffset toks pos  -}  lengthOfLastLine (toks1++toks21) --JULIEN
-                 newOffset = {-getOffset (toks1++newToks++ toks22) pos -} lengthOfLastLine (toks1++newToks) -- JULIEN
-             in  toks1++ (newToks++toks22))  -- adjustLayout toks22 oldOffset newOffset) ) 
+                 newOffset = {-getOffset (toks1++newToks'++ toks22) pos -} lengthOfLastLine (toks1++newToks) -- JULIEN
+             in  toks1 ++ (newToks' ++ toks22))  -- adjustLayout toks22 oldOffset newOffset) ) 
    where
       (toks1, toks21, toks22) = splitToks (startPos, endPos) toks
+      newToks' = map markToken newToks
 
 -- ---------------------------------------------------------------------
 
--- | Make sure all tokens have at least one space between them
-reAlignToks :: [PosToken] -> [PosToken]
-reAlignToks [] = []
-reAlignToks [t] = [t]
-reAlignToks (tok1@((GHC.L l1 t1),s1):tok2@((GHC.L l2 t2),s2):ts)
-  = tok1:reAlignToks (tok2':ts)
+-- |Replace a single token in the token stream by a new token, adjust
+-- the layout to the end of the current line as well. To use this
+-- function make sure the start position really exists in the token
+-- stream.
+-- Note: does not re-align, else other later replacements may fail.
+replaceTok::[PosToken]->SimpPos->PosToken->[PosToken]
+replaceTok toks pos newTok =
+    if length toksSameLine == 0 && length toksRest == 0
+        then toks1 ++ [newTok]
+        else let
+               -- newToks = toks1 ++ (reAlignToks (newTok:toksSameLine)) ++ toksRest
+               newToks = toks1 ++ (newTok':toksSameLine) ++ toksRest
+             in newToks
    where
-     (sr1,sc1) = getGhcLoc l1
-     (er1,ec1) = getGhcLocEnd l1
-     (sr2,sc2) = getGhcLoc l2
-     (er2,ec2) = getGhcLocEnd l2
-     ((sr,sc),(er,ec)) = if (er1 == sr2 && ec1 >= sc2)
-              then ((sr2,ec1+1),(er2,ec1+ec2-sc2+1))
-              else ((sr2,sc2),(er2,ec2))
-     fname = GHC.mkFastString "foo"
-     l2' = GHC.mkRealSrcSpan (GHC.mkRealSrcLoc fname sr sc)
-                             (GHC.mkRealSrcLoc fname er ec)
-     tok2' = ((GHC.L (GHC.RealSrcSpan l2') t2),s2)
+      (toks1,toks2) = break (\t -> tokenPos t >= pos && tokenLen t > 0) toks
+      (toksSameLine,toksRest) = if emptyList toks2
+         then error $ "replaceTok(" ++ show pos ++ "): token not in stream"
+         else break (newRowFound (head $ tail toks2))  (tail toks2)
+
+      newRowFound t1 t2 = tokenRow t1 /= tokenRow t2
+      newTok' = markToken newTok
 
 -- ---------------------------------------------------------------------
 
@@ -784,34 +638,6 @@ getOffset toks pos
          then error "HaRe error: position does not exist in the token stream!"
          else lengthOfLastLine ts1
 -}
-
--- | Get the indent of the line before, taking into account in-line
--- where, let, in and do tokens
-getIndentOffset :: [PosToken] -> SimpPos -> Int
-getIndentOffset [] _pos    = 1
-getIndentOffset toks (0,0) = 1
-getIndentOffset toks pos
-  = let (ts1, ts2) = break (\t->tokenPos t >= pos) toks
-    in if (emptyList ts2)
-         then error "HaRe error: position does not exist in the token stream!"
-         else let (sl,_) = splitOnNewLn $ reverse ts1
-                -- sl is the reversed tokens of the previous line
-                  sls = filter (\t -> tokenLen t > 0) sl
-                  firstTok = (glast "getIndentOffset" sls)
-              in if startLayout firstTok
-                  then if (length sls > 1)
-                          then tokenOffset (last $ init sls)
-                          else 4 + tokenOffset firstTok
-                  else tokenOffset firstTok
-
-      where
-        tokenOffset t = (tokenCol t) - 1
-
-        startLayout ((GHC.L _ (GHC.ITdo)),_)    = True
-        startLayout ((GHC.L _ (GHC.ITin)),_)    = True
-        startLayout ((GHC.L _ (GHC.ITlet)),_)   = True
-        startLayout ((GHC.L _ (GHC.ITwhere)),_) = True
-        startLayout _  = False
 
 -- ---------------------------------------------------------------------
 
@@ -1278,50 +1104,14 @@ extendBackwards toks startLoc endLoc backwardCondFun
 -- |Get the start&end location of syntax phrase t, then extend the end
 -- location to cover the comment/white spaces or new line which starts
 -- in the same line as the end location
+-- TODO: deprecate this in favour of startEndLocIncComments
 startEndLocIncFowComment::(SYB.Data t)=>[PosToken]->t->(SimpPos,SimpPos)
 startEndLocIncFowComment toks t
   = let (startLoc,endLoc)=getStartEndLoc t
         (_,endLocIncComments) = startEndLocIncComments toks t
     in (startLoc, endLocIncComments)
 
-{- ++original++
-
-{-Get the start&end location of syntax phrase t, then extend the end location to cover the comment/white spaces
-  or new line which starts in the same line as the end location-}
-startEndLocIncFowComment::(Term t, Printable t,StartEndLoc t)=>[PosToken]->t->(SimpPos,SimpPos)
-startEndLocIncFowComment toks t
-       =let (startLoc,endLoc)=getStartEndLoc toks t
-            toks1= gtail "startEndLocIncFowComment"  $ dropWhile (\t->tokenPos t/=endLoc) toks
-            toks11 = let (ts1, ts2) = break hasNewLn toks1
-                     in (ts1 ++ if ts2==[] then [] else [ghead "startEndLocInFowComment" ts2])
-         in  if toks11/=[] && all (\t->isWhite t || endsWithNewLn t) toks11
-             then (startLoc, tokenPos (glast "startEndLocIncFowComment" toks11))
-             else (startLoc, endLoc)
-++ original end -}
-
 {-
-{-get the start&end location of t in the token stream, then extend the end location to cover
-  the following '\n' if there is no other characters (except white space) between t and the '\n'
--}
-startEndLocIncFowNewLn::(Term t, Printable t,StartEndLoc t)=>[PosToken]->t->(SimpPos,SimpPos)
-startEndLocIncFowNewLn toks t
-  =let (startLoc,endLoc)=getStartEndLoc toks t
-       toks1 = dropWhile isWhiteSpace $ gtail "startEndLocIncFowNewLn"  $ dropWhile (\t->tokenPos t /=endLoc) toks
-       nextTok= if toks1==[] then defaultToken else head toks1
-   in if isNewLn nextTok
-        then (startLoc, tokenPos nextTok)
-        else (startLoc, endLoc)
--}
--- ---------------------------------------------------------------------
-{-
---Create a list of white space tokens.
-whiteSpacesToken::SimpPos->Int->[PosToken]
-whiteSpacesToken (row,col) n
-  |n>0        = [(Whitespace,(Pos 0 row col,replicate n ' '))]
-  |otherwise  = []
-
--------------------------------------------------------------------------------------------------
-
 adjustOffset::Int->[PosToken]->Bool->[PosToken]
 adjustOffset offset [] _ = []
 adjustOffset offset toks firstLineIncluded

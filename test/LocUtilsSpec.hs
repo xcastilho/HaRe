@@ -24,7 +24,7 @@ import Control.Monad.State
 import Data.Maybe
 import Language.Haskell.Refact.Utils
 import Language.Haskell.Refact.Utils.Monad
-import Language.Haskell.Refact.Utils.MonadUtils
+import Language.Haskell.Refact.Utils.MonadFunctions
 import Language.Haskell.Refact.Utils.LocUtils
 import Language.Haskell.Refact.Utils.TokenUtils
 import Language.Haskell.Refact.Utils.TypeSyn
@@ -46,7 +46,6 @@ spec = do
       let declsr = hsBinds renamed
 
       let decls = filter isFunOrPatBindR declsr
-
       let decl = head $ drop 4 decls
       let (startPos,endPos) = startEndLocIncComments toks decl
 
@@ -80,7 +79,7 @@ spec = do
 
 
       (show $ getStartEndLoc decl) `shouldBe` "((21,1),(21,14))"
-      (show   (startPos,endPos)) `shouldBe` "((20,1),(24,73))"
+      (show   (startPos,endPos)) `shouldBe` "((20,1),(22,18))"
 
     -- -----------------------------------------------------------------
 
@@ -185,6 +184,39 @@ spec = do
       (show $ getStartEndLoc decl) `shouldBe` "((19,1),(21,14))"
       (show   (startPos,endPos)) `shouldBe` "((18,1),(21,14))"
 
+    -- ---------------------------------
+
+    it "ignores trailing empty tokens" $ do
+      (t, toks) <- parsedFileWhereIn6Ghc
+      let renamed = fromJust $ GHC.tm_renamed_source t
+
+      let declsr = hsBinds renamed
+      let decls = filter isFunOrPatBindR declsr
+      let decl = head $ decls
+      (show $ getStartEndLoc decl) `shouldBe` "((13,1),(13,21))"
+      let (startPos,endPos) = startEndLocIncComments toks decl
+
+      (GHC.showPpr decl) `shouldBe` "Demote.WhereIn6.addthree a b c = a GHC.Num.+ b GHC.Num.+ c"
+      -- (SYB.showData SYB.Renamer 0 decl) `shouldBe` "Demote.WhereIn6.addthree a b c = a GHC.Num.+ b GHC.Num.+ c"
+      (showToks $ getToks ((13,1),(22,1)) toks) `shouldBe`
+             ("[(((13,1),(13,1)),ITvccurly,\"\"),"++
+              "(((13,1),(13,1)),ITsemi,\"\"),"++
+              "(((13,1),(13,9)),ITvarid \"addthree\",\"addthree\"),"++
+              "(((13,10),(13,11)),ITvarid \"a\",\"a\"),"++
+              "(((13,12),(13,13)),ITvarid \"b\",\"b\"),"++
+              "(((13,14),(13,15)),ITvarid \"c\",\"c\"),"++
+              "(((13,15),(13,16)),ITequal,\"=\"),"++
+              "(((13,16),(13,17)),ITvarid \"a\",\"a\"),"++
+              "(((13,17),(13,18)),ITvarsym \"+\",\"+\"),"++
+              "(((13,18),(13,19)),ITvarid \"b\",\"b\"),"++
+              "(((13,19),(13,20)),ITvarsym \"+\",\"+\"),"++
+              "(((13,20),(13,21)),ITvarid \"c\",\"c\"),"++
+              "(((16,1),(16,1)),ITsemi,\"\")]")
+
+
+      (show $ getStartEndLoc decl) `shouldBe` "((13,1),(13,21))"
+      (show   (startPos,endPos)) `shouldBe` "((13,1),(13,21))"
+
   -- -------------------------------------------------------------------
 
   describe "startEndLocIncFowComment" $ do
@@ -201,7 +233,7 @@ spec = do
 
       (GHC.showPpr decl) `shouldBe` "FreeAndDeclared.Declare.unD (FreeAndDeclared.Declare.B y) = y"
 
-      (showToks $ getToks ((18,1),(25,1)) toks) `shouldBe` 
+      (showToks $ getToks ((18,1),(25,1)) toks) `shouldBe`
              ("[(((18,1),(18,1)),ITsemi,\"\")," ++
              "(((18,1),(18,5)),ITdata,\"data\")," ++
              "(((18,6),(18,7)),ITconid \"D\",\"D\")," ++
@@ -229,11 +261,11 @@ spec = do
 
 
       (show $ getStartEndLoc decl) `shouldBe` "((21,1),(21,14))"
-      (show   (startPos,endPos)) `shouldBe` "((21,1),(24,73))"
+      (show   (startPos,endPos)) `shouldBe` "((21,1),(22,18))"
 
     -- -----------------------------------------------------------------
 
-    it "get start&end loc, including trailing comments, but not next from next decl" $ do
+    it "get start&end loc, including trailing comments, but not next from next decl 1" $ do
       (t, toks) <- parsedFileDemoteGhc
       let renamed = fromJust $ GHC.tm_renamed_source t
 
@@ -267,6 +299,65 @@ spec = do
       (show $ getStartEndLoc decl) `shouldBe` "((4,1),(4,19))"
       (show   (startPos,endPos)) `shouldBe` "((4,1),(4,19))"
 
+    -- -----------------------------------------------------------------
+
+    it "get start&end loc, including trailing comments, but not next from next decl 2" $ do
+      (t, toks) <- parsedFileTokenTestGhc
+
+      let renamed = fromJust $ GHC.tm_renamed_source t
+      let decls = hsBinds renamed
+      let decl@(GHC.L l _) = head $ tail decls
+      (GHC.showPpr l) `shouldBe` "test/testdata/TokenTest.hs:(13,1)-(15,16)"
+      (showSrcSpan l) `shouldBe` "((13,1),(15,17))"
+
+      let (startPos,endPos) = startEndLocIncFowComment toks decl
+
+      (GHC.showPpr decls) `shouldBe` "[TokenTest.foo x y\n   = do { c <- System.IO.getChar;\n          GHC.Base.return c },\n TokenTest.bab a b = let bar = 3 in b GHC.Num.+ bar,\n TokenTest.bib a b\n   = x\n   where\n       x = 3,\n TokenTest.bob a b\n   = x\n   where\n       x = 3]"
+      (GHC.showPpr decl) `shouldBe` "TokenTest.bab a b = let bar = 3 in b GHC.Num.+ bar"
+
+      (showToks $ getToks ((13,1),(19,1)) toks) `shouldBe` 
+             ("[(((13,1),(13,1)),ITvccurly,\"\"),"++
+              "(((13,1),(13,1)),ITsemi,\"\"),"++
+              "(((13,1),(13,4)),ITvarid \"bab\",\"bab\"),"++
+              "(((13,5),(13,6)),ITvarid \"a\",\"a\"),"++
+              "(((13,7),(13,8)),ITvarid \"b\",\"b\"),"++
+              "(((13,9),(13,10)),ITequal,\"=\"),"++
+              "(((14,3),(14,6)),ITlet,\"let\"),"++
+              "(((14,7),(14,7)),ITvocurly,\"\"),"++
+              "(((14,7),(14,10)),ITvarid \"bar\",\"bar\"),"++
+              "(((14,11),(14,12)),ITequal,\"=\"),"++
+              "(((14,13),(14,14)),ITinteger 3,\"3\"),"++
+              "(((15,3),(15,3)),ITvccurly,\"\"),"++
+              "(((15,3),(15,5)),ITin,\"in\"),"++
+              "(((15,10),(15,11)),ITvarid \"b\",\"b\"),"++
+              "(((15,12),(15,13)),ITvarsym \"+\",\"+\"),"++
+              "(((15,14),(15,17)),ITvarid \"bar\",\"bar\"),"++
+              "(((15,18),(15,38)),ITlineComment \"-- ^trailing comment\",\"-- ^trailing comment\"),"++
+              "(((18,1),(18,19)),ITlineComment \"-- leading comment\",\"-- leading comment\"),"++
+              "(((19,1),(19,1)),ITsemi,\"\"),(((19,1),(19,4)),ITvarid \"foo\",\"foo\")]")
+
+
+      (show $ getStartEndLoc decl) `shouldBe` "((13,1),(15,17))"
+      (show   (startPos,endPos)) `shouldBe` "((13,1),(15,38))"
+
+  -- -------------------------------------------------------------------
+
+  describe "divideComments" $ do
+    it "divides tokens falling between two declarations" $ do
+      (t, toks) <- parsedFileTokenTestGhc
+
+      let commentToks = getToks ((15,18),(18,19)) toks
+      let (first,second) = divideComments 15 19 commentToks
+
+      (showToks $ getToks ((15,14),(19,1)) toks) `shouldBe` 
+             ("[(((15,14),(15,17)),ITvarid \"bar\",\"bar\"),"++
+              "(((15,18),(15,38)),ITlineComment \"-- ^trailing comment\",\"-- ^trailing comment\"),"++
+              "(((18,1),(18,19)),ITlineComment \"-- leading comment\",\"-- leading comment\"),"++
+              "(((19,1),(19,1)),ITsemi,\"\"),(((19,1),(19,4)),ITvarid \"foo\",\"foo\")]")
+
+      (showToks first) `shouldBe` "[(((15,18),(15,38)),ITlineComment \"-- ^trailing comment\",\"-- ^trailing comment\")]"
+      (showToks second) `shouldBe` "[(((18,1),(18,19)),ITlineComment \"-- leading comment\",\"-- leading comment\")]"
+             
   -- -------------------------------------------------------------------
 
   describe "tokenise" $ do
@@ -377,6 +468,55 @@ spec = do
                "(((4,25),(4,30)),ITstring \"Odd\",\"\\\"Odd\\\"\")," ++
                "(((4,31),(4,35)),ITelse,\"else\")," ++
                "(((4,36),(4,42)),ITstring \"Even\",\"\\\"Even\\\"\")]"
+
+  -- -------------------------------------------------------------------
+
+  describe "replaceTok" $ do
+    it "Replaces a single tokens in a token stream" $ do
+      (t,toks) <- parsedFileCaseBGhc
+      let renamed = fromJust $ GHC.tm_renamed_source t
+
+      let Just expr = locToExp (4,7) (4,43) renamed :: Maybe (GHC.Located (GHC.HsExpr GHC.Name))
+          (front,middle,_back) = splitToks ((4,1),(4,20)) toks
+      (showToks middle) `shouldBe`
+               "[(((4,1),(4,1)),ITvocurly,\"\"),"++
+               "(((4,1),(4,4)),ITvarid \"foo\",\"foo\"),"++
+               "(((4,5),(4,6)),ITvarid \"x\",\"x\"),"++
+               "(((4,7),(4,8)),ITequal,\"=\"),"++
+               "(((4,9),(4,11)),ITif,\"if\")," ++
+               "(((4,12),(4,13)),IToparen,\"(\")," ++
+               "(((4,13),(4,16)),ITvarid \"odd\",\"odd\")," ++
+               "(((4,17),(4,18)),ITvarid \"x\",\"x\")," ++
+               "(((4,18),(4,19)),ITcparen,\")\")," ++
+               "(((4,20),(4,24)),ITthen,\"then\")]"
+
+      (GHC.showRichTokenStream middle) `shouldBe` "\n\n\n foo x = if (odd x) then"
+
+      let (GHC.L l t,n) = head $ tail middle
+ 
+      let newTok = (GHC.L l t,"marimba")
+      (showToks [newTok]) `shouldBe` "[(((4,1),(4,4)),ITvarid \"foo\",\"marimba\")]"
+
+      let newToks = replaceTok middle (4,1) newTok
+      (showToks newToks) `shouldBe`
+               "[(((4,1),(4,1)),ITvocurly,\"\"),"++
+
+               -- "(((4,1),(4,4)),ITvarid \"foo\",\"foo\"),"++
+               "(((4,1),(4,4)),ITvarid \"foo\",\"marimba\"),"++ -- the new tok
+
+               "(((4,5),(4,6)),ITvarid \"x\",\"x\"),"++
+               "(((4,7),(4,8)),ITequal,\"=\"),"++
+               "(((4,9),(4,11)),ITif,\"if\")," ++
+               "(((4,12),(4,13)),IToparen,\"(\")," ++
+               "(((4,13),(4,16)),ITvarid \"odd\",\"odd\")," ++
+               "(((4,17),(4,18)),ITvarid \"x\",\"x\")," ++
+               "(((4,18),(4,19)),ITcparen,\")\")," ++
+               "(((4,20),(4,24)),ITthen,\"then\")]"
+
+      -- Check for token marker
+      let (GHC.L l _,_) = head $ tail newToks
+      (GHC.showPpr l) `shouldBe` "HaRe:4:1-3"
+      
 
   -- -------------------------------------------------------------------
 
@@ -506,7 +646,7 @@ spec = do
 
   describe "getSrcSpan" $ do
     it "Finds the top SrcSpan" $ do
-      (t, toks) <- parsedFileDd1Ghc
+      (t, _toks) <- parsedFileDd1Ghc
       let renamed = fromJust $ GHC.tm_renamed_source t
       let declsr = hsBinds renamed
           ss = getSrcSpan declsr
@@ -574,6 +714,7 @@ spec = do
 
       (GHC.showPpr decl) `shouldBe` "Demote.WhereIn6.addthree a b c = a GHC.Num.+ b GHC.Num.+ c"
       -- (SYB.showData SYB.Renamer 0 decl) `shouldBe` "Demote.WhereIn6.addthree a b c = a GHC.Num.+ b GHC.Num.+ c"
+      (show   (startPos,endPos)) `shouldBe` "((13,1),(13,21))"
 
       let (GHC.L _ (GHC.FunBind _ _ (GHC.MatchGroup matches _)  _ _ _)) = decl
       -- (SYB.showData SYB.Renamer 0 matches) `shouldBe` "Demote.WhereIn6.addthree a b c = a GHC.Num.+ b GHC.Num.+ c"
@@ -649,14 +790,21 @@ spec = do
              pats = [GHC.noLoc (GHC.VarPat n1), GHC.noLoc (GHC.VarPat n2)]
 
          addFormalParams tlDecls pats
-
-         return (tlDecls,ln)
-      ((d,l),s) <- runRefactGhcState comp
+         
+         forest <- getTokenTree
+         return (tlDecls,ln,forest)
+      ((d,l,f),s) <- runRefactGhcState comp
       (GHC.showPpr l) `shouldBe` "DupDef.Dd1.toplevel";
       (GHC.showPpr d) `shouldBe` "[DupDef.Dd1.toplevel x = DupDef.Dd1.c GHC.Num.* x]"
       -- (showToks $ take 20 $ toksFromState s) `shouldBe` ""
-      (GHC.showRichTokenStream $ toksFromState s) `shouldBe` "module DupDef.Dd1 where\n\n  toplevel :: Integer -> Integer\n  toplevel x = c * x n1 n2\n\n  c , d :: Integer\n  c = 7\n  d = 9\n\n -- Pattern bind\n  tup :: ( Int , Int )\n  h :: Int\n  t :: Int\n  tup @ ( h , t ) = head $ zip [ 1 .. 10 ] [ 3 .. ff ]\n   where\n      ff :: Int\n      ff = 15\n\n   data D = A | B String | C\n\n  ff y = y + zz\n   where\n      zz = 1\n\n   l z =\n   let\n      ll = 34\n    in ll + z\n\n  dd q = do\n    let  ss = 5\n     return ( ss + q )\n\n  "
-
+      (drawTreeEntry f) `shouldBe`
+                "((1,1),(34,1))\n|\n"++
+                "+- ((1,1),(3,31))\n|\n"++
+                "+- ((4,1),(4,19))\n|\n"++
+                "+- ((1000004,20),(1000004,25))\n|\n"++
+                "`- ((6,1),(34,1))\n"
+      -- (showTree f) `shouldBe` ""
+      (GHC.showRichTokenStream $ toksFromState s) `shouldBe` "module DupDef.Dd1 where\n\n toplevel :: Integer -> Integer\n toplevel x = c * x n1 n2\n\n c,d :: Integer\n c = 7\n d = 9\n\n -- Pattern bind\n tup :: (Int, Int)\n h :: Int\n t :: Int\n tup@(h,t) = head $ zip [1..10] [3..ff]\n   where\n     ff :: Int\n     ff = 15\n\n data D = A | B String | C\n\n ff y = y + zz\n   where\n     zz = 1\n\n l z =\n   let\n     ll = 34\n   in ll + z\n\n dd q = do\n   let ss = 5\n   return (ss + q)\n\n "
 
 
   -- -------------------------------------------------------------------
@@ -669,6 +817,21 @@ spec = do
                  ]
       (showToks toks) `shouldBe` "[(((1,1),(1,3)),ITsemi,\"v1\"),(((1,1),(1,3)),ITsemi,\"v2\"),(((1,1),(1,3)),ITsemi,\"v3\")]"
       (showToks $ reAlignToks toks) `shouldBe` "[(((1,1),(1,3)),ITsemi,\"v1\"),(((1,4),(1,6)),ITsemi,\"v2\"),(((1,7),(1,9)),ITsemi,\"v3\")]"
+
+    it "spaces tokens out if they overlap, over multiple lines" $ do
+      let toks = [mkToken GHC.ITsemi (1,1) "v1"
+                 ,mkToken GHC.ITsemi (1,1) "v2"
+                 ,mkToken GHC.ITsemi (1,1) "v3"
+                 ,mkToken GHC.ITsemi (2,1) "v4"
+                 ,mkToken GHC.ITsemi (2,9) "v5"
+                 ]
+      (showToks toks) `shouldBe` 
+            "[(((1,1),(1,3)),ITsemi,\"v1\"),(((1,1),(1,3)),ITsemi,\"v2\"),(((1,1),(1,3)),ITsemi,\"v3\"),"++
+            "(((2,1),(2,3)),ITsemi,\"v4\"),(((2,9),(2,11)),ITsemi,\"v5\")]"
+
+      (showToks $ reAlignToks toks) `shouldBe` 
+            "[(((1,1),(1,3)),ITsemi,\"v1\"),(((1,4),(1,6)),ITsemi,\"v2\"),(((1,7),(1,9)),ITsemi,\"v3\"),"++
+            "(((2,1),(2,3)),ITsemi,\"v4\"),(((2,9),(2,11)),ITsemi,\"v5\")]"
 
   -- -------------------------------------------------------------------
 
