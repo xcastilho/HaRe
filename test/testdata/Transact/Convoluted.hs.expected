@@ -1,0 +1,29 @@
+module Convoluted where
+
+import Control.Concurrent
+import Control.Concurrent.STM
+
+
+swapMVars :: TMVar a -> TMVar a -> IO ()
+swapMVars x y = do
+    a <- atomically (takeTMVar x)
+    b <- atomically (takeTMVar y)
+    atomically (putMVar x b)
+    atomically (putMVar y a)
+
+
+
+
+main :: IO ()
+main = do
+    v1 <- newEmptyTMVarIO
+    v2 <- newEmptyTMVarIO
+    v3 <- newEmptyTMVarIO
+
+    -- ...
+
+    swapMVars v1 v2
+
+    -- ...
+
+    swapMVars v2 v3
