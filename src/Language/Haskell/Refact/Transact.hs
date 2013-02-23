@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables, RankNTypes, BangPatterns #-}
 -----------------------------------------------------------------------------
 --
 -- Module      :  Language.Haskell.Refact.Transact
@@ -8,7 +8,6 @@
 -- Maintainer  :  Chris Brown
 -- Stability   :  Provisional
 -- Portability :
--- Author      :  Francisco Soares
 --
 -- |
 --
@@ -46,7 +45,7 @@ import Language.Haskell.Refact.Utils
 import Language.Haskell.Refact.Utils.GhcUtils
 import Language.Haskell.Refact.Utils.LocUtils
 import Language.Haskell.Refact.Utils.Monad
-import Language.Haskell.Refact.Utils.MonadUtils
+import Language.Haskell.Refact.Utils.MonadFunctions
 import Language.Haskell.Refact.Utils.TokenUtils
 import Language.Haskell.Refact.Utils.TypeSyn
 import Language.Haskell.Refact.Utils.TypeUtils
@@ -66,7 +65,7 @@ transact :: [String] -> IO ()
 transact args = do
     runRefacSession Nothing (comp Nothing fileName (row,col))
     return () where
-        fileName = head args
+        fileName = ghead "filename" args
         row = read (args!!1)::Int
         col = read (args!!2)::Int
 
@@ -124,30 +123,67 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed = do
     -- then I'll focus on refactoring the type signature.
 
     -- 2) get its binding(s)
-    let binding = listifyStaged SYB.Renamer (isDesiredBinding n1) renamed
+    let binding      = listifyStaged SYB.Renamer (isDesiredBinding n1) renamed
     -- 3) get its applications
     let applications = listifyStaged SYB.Renamer (isDesiredApplication n1) renamed
 
     -- 4.1) separate applications different from the concurrency functions
     let uncommonApps = filter (not . appMatchesDefaultConc) applications
 
-    let commonApps = filter appMatchesDefaultConc applications
+    let commonApps   = filter appMatchesDefaultConc applications
 
-    
+    let commonApps2  = filterLExpr commonApps []    
 
-    renamed' <- everywhereMStaged SYB.Renamer (SYB.mkM inMod `SYB.extM` inExp {-`SYB.extM` inType -}) renamed -- this needs to be bottom up +++ CMB +++
+    let appStarts    = map startEndLineCol commonApps2
+
+    renamed' <- everywhereMStaged SYB.Renamer (SYB.mkM inMod `SYB.extM` (inExp appStarts) {-`SYB.extM` inType -}) renamed -- this needs to be bottom up +++ CMB +++
 --    liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Parser 0 renamed'{-(GHC.L x (GHC.VarPat n2))-} ++ "<")
     putRefactRenamed renamed'
 
     return ()
+    liftIO $ putStrLn $ "Found name? "++(show (isJust (getName "Control.Concurrent.STM.TMVar.newEmptyTMVarIO" renamed)))
     liftIO $ putStrLn $"Number of applications "++ (show $ length applications) ++ " " ++ (GHC.showPpr applications)
     liftIO $ putStrLn $"Number of uncommon functions "++ (show $ length uncommonApps) ++ " " ++ (SYB.showData SYB.Renamer 0 uncommonApps)
+    liftIO $ putStrLn $"Number of common functions "++ (show $ length commonApps2) ++ " " ++ (GHC.showPpr commonApps2)--(SYB.showData SYB.Renamer 0 commonApps2)
     liftIO $ putStrLn $"Number of bindings "++ (show $ length binding) ++ " " ++ (SYB.showData SYB.Renamer 0 binding)
 --(GHC.showPpr binding)
 
 --    liftIO $ putStrLn $"test> "++ (SYB.showData SYB.Renamer 0 renamed)
 
     where
+         atomicallyName :: RefactGhc GHC.Name
+         atomicallyName = do
+                 let maybeAtomName = getName "atomically" renamed
+                 if isJust maybeAtomName then return $ fromJust maybeAtomName
+                 else mkNewGhcName "atomically"
+
+         startLineCol :: GHC.Located a -> (Int,Int)
+         startLineCol (GHC.L l _) = 
+                 let 
+                     rsspan    = realSrcSpan l 
+                     startLine = GHC.srcSpanStartLine rsspan
+                     startCol  = GHC.srcSpanStartCol rsspan
+                 in (startLine, startCol)
+
+         startEndLineCol :: GHC.Located a -> ((Int,Int),(Int,Int))
+         startEndLineCol (GHC.L l _) =
+                 let
+                     rsspan    = realSrcSpan l
+                     startLine = GHC.srcSpanStartLine rsspan
+                     startCol  = GHC.srcSpanStartCol rsspan
+                     endLine   = GHC.srcSpanEndLine rsspan
+                     endCol    = GHC.srcSpanEndCol rsspan
+                 in ((startLine, startCol),(endLine,endCol))
+
+
+         filterLExpr :: [GHC.LHsExpr GHC.Name] -> [(Int, Int)] -> [GHC.LHsExpr GHC.Name]
+         filterLExpr (lexpr:lexprs) initialPositions = 
+                 let 
+                     new = not $ elem (startLineCol lexpr) initialPositions
+                 in
+                     if new then lexpr : (filterLExpr lexprs $ (startLineCol lexpr):initialPositions)
+                     else filterLExpr lexprs initialPositions
+         filterLExpr [] _ = []
 
          stmModuleName = GHC.mkModuleName "Control.Concurrent.STM"
 
@@ -162,17 +198,21 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed = do
          -- apparently runs on SYB monad
          inMod (bindSt@(GHC.BindStmt
             (GHC.L x (GHC.VarPat n2))
-            (GHC.L y (GHC.HsVar nv)) z w )::(GHC.StmtLR GHC.Name GHC.Name))
+            oldf@(GHC.L y (GHC.HsVar nv)) z w )::(GHC.StmtLR GHC.Name GHC.Name))
               | GHC.nameUnique n1 == GHC.nameUnique n2
                 = do
                     liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Parser 0 bindSt{-(GHC.L x (GHC.VarPat n2))-} ++ "<")
-                    newName <- mkNewGhcName "newEmptyTMVarIO"
+                    newName <- (\x -> if isJust x then mkNewGhcName (fromJust x)
+                                      else return nv) $ case nameToString nv of 
+                                    "GHC.MVar.newEmptyMVar" -> Just "newEmptyTMVarIO"
+                                    "GHC.MVar.newMVar"      -> Just "Control.Concurrent.STM.TMVar.newTMVarIO"
+                                    _                       -> Nothing --(nameToString nv)
                     liftIO $ putStrLn $ nameToString nv
                     liftIO $ putStrLn $ nameToString newName
                     --liftIO $ putStrLn $ show $ GHC.nameUnique oldName
                     -- liftIO $ putStrLn $ show $ (GHC.nameUnique oldName) == (GHC.nameUnique nv)
                     --replacedFunction <- changeFunctionName nv
-                    oldf <- return (GHC.L y (GHC.HsVar nv))
+                    --oldf <- return (GHC.L y (GHC.HsVar nv))
                     newf <- newFuncName oldf newName
                     newBindSt <- return (GHC.BindStmt (GHC.L x (GHC.VarPat n2)) newf z w)
                     liftIO $ putStrLn ("inChanged>" ++ SYB.showData SYB.Parser 0 newBindSt{-(GHC.L x (GHC.VarPat n2))-} ++ "<")
@@ -180,6 +220,31 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed = do
                     updateToks oldf newf GHC.showPpr False
                     return newBindSt
                     --return bindSt
+         inMod (bindSt@(GHC.BindStmt
+            (GHC.L x (GHC.VarPat n2))
+            (GHC.L _ (GHC.HsApp oldf@(GHC.L y (GHC.HsVar nv)) _ )) z w )::(GHC.StmtLR GHC.Name GHC.Name))
+              | GHC.nameUnique n1 == GHC.nameUnique n2
+                = do
+                    liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Parser 0 bindSt{-(GHC.L x (GHC.VarPat n2))-} ++ "<")
+                    newName <- (\x -> if isJust x then mkNewGhcName (fromJust x)
+                                      else return nv) $ case nameToString nv of 
+                                    "GHC.MVar.newEmptyMVar" -> Just "newEmptyTMVarIO"
+                                    "GHC.MVar.newMVar"      -> Just "Control.Concurrent.STM.TMVar.newTMVarIO"
+                                    _                       -> Nothing --(nameToString nv)
+                    liftIO $ putStrLn $ nameToString nv
+                    liftIO $ putStrLn $ nameToString newName
+                    --liftIO $ putStrLn $ show $ GHC.nameUnique oldName
+                    -- liftIO $ putStrLn $ show $ (GHC.nameUnique oldName) == (GHC.nameUnique nv)
+                    --replacedFunction <- changeFunctionName nv
+                    --oldf <- return (GHC.L y (GHC.HsVar nv))
+                    newf <- newFuncName oldf newName
+                    newBindSt <- return (GHC.BindStmt (GHC.L x (GHC.VarPat n2)) newf z w)
+                    liftIO $ putStrLn ("inChanged>" ++ SYB.showData SYB.Parser 0 newBindSt{-(GHC.L x (GHC.VarPat n2))-} ++ "<")
+                    liftIO $ putStrLn ("Location changed>" ++ (show y)++"<<")
+                    updateToks oldf newf GHC.showPpr False
+                    return newBindSt
+                    --return bindSt
+
          inMod func = return func
 
          -- /modifying the bindstatement
@@ -194,11 +259,21 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed = do
                          return (GHC.FunBind (GHC.L x n2) infixity (GHC.MatchGroup newMatches p) a locals tick)
          inMod func = return func-}
 
-         -- 2. All call sites of the function...
-         inExp exp@((GHC.L x (GHC.HsApp (GHC.L y (GHC.HsApp e e1)) e2))::GHC.Located (GHC.HsExpr GHC.Name))
-            | GHC.nameUnique (expToName e) == GHC.nameUnique n1
-                   =  update e2 e1 =<< update e1 e2 exp
-         inExp e = return e
+         -- Change call sites
+         inExp selectedApps exp@((GHC.L l app@(GHC.HsApp _ _))::GHC.Located (GHC.HsExpr GHC.Name))
+            | (startEndLineCol exp) `elem` selectedApps
+                   = do
+                    atomName <- atomicallyName
+                    newAtomName <- return $ atomName --{
+                                               -- Name.n_sort :: Name.NameSort,
+                                               -- Name.n_occ :: !GHC.OccName,
+                                               -- Name.n_uniq :: FastTypes.FastInt,
+                                      --         GHC.n_loc = l-- !GHC.SrcSpan
+                                           -- }
+                    translatedTree <- translateHsApp True {-atomName-} app
+                    updateToks exp (GHC.L l translatedTree) (GHC.showPpr) False
+                    return (GHC.L l translatedTree) -- update e2 e1 =<< update e1 e2 exp
+         inExp _ e = return e
 
          -- 3. Type signature...
          -- <turned off for now>
@@ -212,7 +287,7 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed = do
 
          inType ty@(GHC.L x (GHC.TypeSig (n:ns) types)::GHC.LSig GHC.Name)
            | GHC.nameUnique n1 `elem` (map (\(GHC.L _ n) -> GHC.nameUnique n) (n:ns))
-            = error "Error in swapping arguments in type signature: signauture bound to muliple entities!"
+            = error "Error in swapping arguments in type signature: signature bound to muliple entities!"
 
          inType ty = return ty
 
@@ -232,15 +307,17 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed = do
                                 matches' <- updateMatches matches
                                 return ((GHC.L x (GHC.Match (p1':p2':ps) nothing rhs)):matches')
 
+instance Eq id => Eq (GHC.HsExpr id)
+
 newFuncName (GHC.L y (GHC.HsVar nv)) newf = return (GHC.L y' (GHC.HsVar newf)) where
     realSpan = realSrcSpan y
     srcFile = GHC.srcSpanFile realSpan
-    startLine = GHC.srcSpanStartLine realSpan
-    endLine = GHC.srcSpanEndLine realSpan
-    startCol = GHC.srcSpanStartCol realSpan
-    endCol = GHC.srcSpanEndCol realSpan
+    startLine = 1--GHC.srcSpanStartLine realSpan
+    endLine = 1--GHC.srcSpanEndLine realSpan
+    startCol = 1--GHC.srcSpanStartCol realSpan
+    endCol = 1--GHC.srcSpanEndCol realSpan
     nameEndDelta = (length (nameToString newf)) - (length (nameToString nv))
-    y' = GHC.mkSrcSpan (GHC.mkSrcLoc srcFile startLine startCol) (GHC.mkSrcLoc srcFile endLine (endCol + nameEndDelta))
+    y' = GHC.mkSrcSpan (GHC.mkSrcLoc srcFile startLine startCol) (GHC.mkSrcLoc srcFile endLine (endCol {-+ nameEndDelta-}))
 
 
 getLocationTesting (GHC.L y (GHC.HsVar nv)) = y
@@ -263,12 +340,19 @@ isDesiredBinding n1 ((GHC.BindStmt
             (GHC.L x (GHC.VarPat n2))
             (GHC.L y (GHC.HsVar nv)) z w )::(GHC.StmtLR GHC.Name GHC.Name))
             = GHC.nameUnique n1 == GHC.nameUnique n2
+isDesiredBinding n1 ((GHC.BindStmt
+            (GHC.L x (GHC.VarPat n2))
+            (GHC.L y (GHC.HsApp (GHC.L _ (GHC.HsVar nv)) _)) z w )::(GHC.StmtLR GHC.Name GHC.Name))
+            = GHC.nameUnique n1 == GHC.nameUnique n2
 isDesiredBinding _ _ = False
 
 -- filter for 3) get its applications
 isDesiredApplication :: GHC.Name -> GHC.LHsExpr GHC.Name -> Bool 
-isDesiredApplication n1 (GHC.L _ (GHC.HsApp exp1 (GHC.L _ (GHC.HsVar nv))))  
+isDesiredApplication n1 (GHC.L _ (GHC.HsApp inApp@(GHC.L _ (GHC.HsApp _ _)) _ {-(GHC.L _ (GHC.HsVar nv))-})) 
+             = isDesiredApplication n1 inApp --GHC.nameUnique n1 == GHC.nameUnique nv
+isDesiredApplication n1 (GHC.L _ (GHC.HsApp _ (GHC.L _ (GHC.HsVar nv))))  
              = GHC.nameUnique n1 == GHC.nameUnique nv              
+--isDesiredApplication _ (GHC.L _ (GHC.HsApp _ _ )) = True
 isDesiredApplication _ _ = False
 
 -- | Looks for the function being applied by a GHC.HsApp, and matches it
@@ -283,11 +367,10 @@ appMatchesDefaultConc (GHC.L _ (GHC.HsApp insideApp@(GHC.L _ (GHC.HsApp _ _)) _)
 appMatchesDefaultConc _ = False
 
 
---mkNewLSomething :: a -> GHC.FastString -> init
---                  -> GHC.Located a -> GHC.Located a
---mkNewLSomething a = (GHC.L l a) where
---    filename = (GHC.mkFastString "f")
---    l = GHC.mkSrcSpan (GHC.mkSrcLoc filename 1 1) (GHC.mkSrcLoc filename 1 1)
+mkNewL :: a -> GHC.Located a
+mkNewL a = (GHC.L l a) where
+    filename = (GHC.mkFastString "f")
+    l = GHC.mkSrcSpan (GHC.mkSrcLoc filename 1 1) (GHC.mkSrcLoc filename 1 1)
 
 -- | Matches a GHC.Name reference with known concurrency modules' names.
 nameMatchesDefaultConc :: GHC.Name -> Bool
@@ -305,11 +388,59 @@ matchesAnyPrefix :: [String] -- ^ Prefixes
                  -> Bool
 matchesAnyPrefix prefixes text = or [ x `isPrefixOf` text | x <- prefixes ]
 
+
 translateFunction :: GHC.Name -> RefactGhc GHC.Name 
 translateFunction n =
     mkNewGhcName $ case nameToString n of 
-        "GHC.MVar.takeMVar" -> "Control.Concurrent.STM.TMVar.takeTMVar"
-        "GHC.MVar.putMVar"  -> "Control.Concurrent.STM.TMVar.putTMVar"
+        "GHC.MVar.takeMVar" -> {-"Control.Concurrent.STM.TMVar.-}"takeTMVar"
+        "GHC.MVar.putMVar"  -> {-"Control.Concurrent.STM.TMVar.-}"putTMVar"
+        _                   -> nameToString n
+
+testeTranslateNull :: GHC.Name -> RefactGhc GHC.Name
+testeTranslateNull n =
+    mkNewGhcName $ case nameToString n of 
+        "GHC.MVar.takeMVar" -> {-"Control.Concurrent.STM.TMVar.-}"atomically"
+        "GHC.MVar.putMVar"  -> {-"Control.Concurrent.STM.TMVar.-}"atomically"
+        _                   -> nameToString n
+
+-- | Translates the calling function from this HsApp.
+--
+-- Author's note: I wrote this function top pattern match in one go, reloaded GHCi, 
+-- and it showed no errors. I gotta say I felt pretty proud about myself right then.
+--        
+translateHsApp :: Bool -- ^ Is this function the topmost application? Deals with  
+                       -- recursive HsApp's, as in functions with multiple arguments.
+--               -> GHC.Name -- ^Name for atomically call.
+               -> GHC.HsExpr GHC.Name -- ^ The application to be refactored.
+               -> RefactGhc ( GHC.HsExpr GHC.Name )
+translateHsApp isTopNode {-atomicallyName-} (GHC.HsApp (GHC.L l insideApp@(GHC.HsApp _ _)) exp2 ) = do
+    translatedLeaf <- translateHsApp False {-atomicallyName-} insideApp
+    translatedNode <- if isTopNode then do
+                     atomicallyName <- mkNewGhcName "atomically"
+                     return $ GHC.HsApp 
+                                  ({-GHC.L l-}mkNewL (GHC.HsVar atomicallyName)) 
+                                  ({-GHC.L l-}mkNewL (GHC.HsPar ({-GHC.L l-}mkNewL (GHC.HsApp 
+                                                                   ({-GHC.L l-}mkNewL translatedLeaf) 
+                                                                    exp2
+                                                            ))))
+                   else 
+                       return $ GHC.HsApp 
+                                    ({-GHC.L l-}mkNewL translatedLeaf) 
+                                     exp2
+                                
+    return translatedNode
+translateHsApp isTopNode {-atomicallyName-} (GHC.HsApp (GHC.L l (GHC.HsVar functionName)) (GHC.L l2 exp2)) = do
+    tmfunction <- translateFunction functionName
+    let translatedNode = GHC.HsApp ({-GHC.L l-}mkNewL (GHC.HsVar tmfunction)) ({-GHC.L l-}mkNewL exp2)
+    if isTopNode then do
+        atomicallyName <- testeTranslateNull functionName --mkNewGhcName "atomically"
+        return $ GHC.HsApp 
+                ({-GHC.L l-}mkNewL (GHC.HsVar atomicallyName)) 
+                ({-GHC.L l-}mkNewL (GHC.HsPar (GHC.L l translatedNode )))
+    else 
+        return translatedNode 
+--    return translatedNode
+translateHsApp _ {-_-} x = return x
 
 
 realSrcSpan :: GHC.SrcSpan -> GHC.RealSrcSpan
