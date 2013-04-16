@@ -9,11 +9,13 @@ module Language.Haskell.Refact.Utils.LocUtils(
                      -- , showToks
                      -- , tokenLen
                      -- ,lengthOfToks
-                     , mkToken, mkZeroToken {-,defaultToken, whiteSpacesToken -},whiteSpaceTokens
+                     -- , mkToken, mkZeroToken {-,defaultToken, -}
+                     {-whiteSpacesToken -}
+                     ,whiteSpaceTokens
                      , realSrcLocFromTok
                      , isWhite
                      , notWhite
-                     , isWhiteSpace
+                     -- , isWhiteSpace
                      {-
                      ,isNewLn,isCommentStart -},isComment {-,
                      isNestedComment-},isMultiLineComment {-,isOpenBracket,isCloseBracket, -}
@@ -26,7 +28,7 @@ module Language.Haskell.Refact.Utils.LocUtils(
                      , lengthOfLastLine
                      , updateToks, updateToksWithPos
                      , getToks
-                     , replaceToks,replaceTok,deleteToks,doRmWhites -- ,doAddWhites
+                     , replaceToks,replaceTok,replaceTokNoReAlign,deleteToks,doRmWhites -- ,doAddWhites
                      , srcLocs
                      , getSrcSpan, getAllSrcLocs
                      -- , ghcSrcLocs -- Test version
@@ -162,9 +164,6 @@ isWhite (GHC.L _ _                        ,_) = False
 
 notWhite  = not.isWhite
 
--- ++WARNING++ : there is no explicit Whitespace token in GHC.
--- isWhiteSpace (t,(_,s))       = t==Whitespace && s==" "
-isWhiteSpace _  = False
 
 {-
 isNewLn (t,(_,s))            = t==Whitespace && s=="\n"
@@ -333,6 +332,7 @@ replaceTabBySpaces (s:ss)
 
 -}
 
+{-
 -- |Compose a new token using the given arguments.
 mkToken::GHC.Token -> SimpPos -> String -> PosToken
 mkToken t (row,col) c = ((GHC.L l t),c)
@@ -343,7 +343,7 @@ mkToken t (row,col) c = ((GHC.L l t),c)
 
 mkZeroToken :: PosToken
 mkZeroToken = mkToken GHC.ITsemi (0,0) ""
-
+-}
 ---Restriction: the refactorer should not modify refactorer-modified/created tokens.
 defaultToken :: PosToken
 defaultToken = (GHC.noLoc (GHC.ITlineComment "defaultToken"), "defaultToken")
@@ -406,7 +406,7 @@ tokenise  startPos colOffset withFirstLineIndent str
      addIndent ln = if withFirstLineIndent
                       then replicate colOffset ' '++ ln
                       else ln
- 
+
 -- ---------------------------------------------------------------------
 
 -- |Convert a string into a set of Haskell tokens. It has default
@@ -414,6 +414,7 @@ tokenise  startPos colOffset withFirstLineIndent str
 basicTokenise :: String -> IO [PosToken]
 basicTokenise str = tokenise startPos 0 False str
   where
+    -- startPos = (GHC.mkRealSrcLoc tokenFileMark 0 1)
     startPos = (GHC.mkRealSrcLoc (GHC.mkFastString "foo") 0 1)
 
 -- ---------------------------------------------------------------------
@@ -547,12 +548,20 @@ updateToks :: (SYB.Data t)
   -> (GHC.Located t -> [Char]) -- ^ pretty printer
   -> Bool         -- ^ Add trailing newline if required
   -> RefactGhc () -- ^ Updates the RefactState
-updateToks oldAST newAST printFun addTrailingNl
+updateToks oldAST@(GHC.L sspan _) newAST printFun addTrailingNl
   -- = trace "updateToks" $
   = do
-       let (startPos, endPos) = getStartEndLoc oldAST
-       updateToksWithPos (startPos,endPos) newAST printFun addTrailingNl
+       -- let (startPos, endPos) = getStartEndLoc oldAST
+       -- updateToksWithPos (startPos,endPos) newAST printFun addTrailingNl
 
+       newToks <- liftIO $ basicTokenise (printFun newAST)
+       let newToks' = if addTrailingNl 
+                       then newToks ++ [newLnToken (last newToks)]
+                       else newToks
+       putToksForSpan sspan  newToks'
+       return ()
+
+-- ---------------------------------------------------------------------
 
 updateToksWithPos :: (SYB.Data t)
   => (SimpPos, SimpPos) -- ^Start and end pos of old element
@@ -562,8 +571,12 @@ updateToksWithPos :: (SYB.Data t)
   -> RefactGhc ()  -- ^ Updates the RefactState
 updateToksWithPos (startPos,endPos) newAST printFun addTrailingNl
   = do
+       -- newToks <- liftIO $ basicTokenise (printFun newAST)
        newToks <- liftIO $ basicTokenise (printFun newAST)
-       putToksForPos (startPos,endPos) newToks
+       let newToks' = if addTrailingNl 
+                       then newToks ++ [newLnToken (last newToks)]
+                       else newToks
+       putToksForPos (startPos,endPos) newToks'
 
        return ()
 
@@ -623,9 +636,22 @@ replaceTok toks pos newTok =
       (toks1,toks2) = break (\t -> tokenPos t >= pos && tokenLen t > 0) toks
       (toksSameLine,toksRest) = if emptyList toks2
          then error $ "replaceTok(" ++ show pos ++ "): token not in stream"
-         else break (newRowFound (head $ tail toks2))  (tail toks2)
+         else break (newRowFound (ghead "replaceTok" $ tail toks2))  (tail toks2)
 
       newRowFound t1 t2 = tokenRow t1 /= tokenRow t2
+      newTok' = markToken newTok
+
+-- ---------------------------------------------------------------------
+
+-- |Replace a single token in the token stream by a new token, without
+-- adjusting the layout.
+-- Note: does not re-align, else other later replacements may fail.
+replaceTokNoReAlign::[PosToken]->SimpPos->PosToken->[PosToken]
+replaceTokNoReAlign toks pos newTok =
+    toks1 ++ [newTok'] ++ toksRest
+   where
+      (toks1,toks2) = break (\t -> tokenPos t >= pos && tokenLen t > 0) toks
+      toksRest = if (emptyList toks2) then [] else (gtail "replaceTokNoReAlign" toks2)
       newTok' = markToken newTok
 
 -- ---------------------------------------------------------------------
@@ -786,8 +812,7 @@ deleteToks toks startPos@(startRow, startCol) endPos@(endRow, endCol)
 
       -- tokens after the tokens to be deleted at the same line.
       after = let t= dropWhile (\t -> tokenPosEnd t <= endPos) toks21
-              in  if (emptyList t) then error "Sorry, HaRe failed to finish this refactoring. DeleteToks"
-                                   -- else gtail "deleteToks6" t
+              in  if (emptyList t) then t -- ++AZ++ error "Sorry, HaRe failed to finish this refactoring. deleteToks"
                                    else t
 
 {- ++ original ++
@@ -1036,8 +1061,8 @@ getAllSrcLocs t = res t
 
 getStartEndLoc2::(SYB.Data t)=>[PosToken]->[GHC.GenLocated GHC.SrcSpan t] ->(SimpPos,SimpPos)
 getStartEndLoc2 toks ts
-  = let (startPos',_) = startEndLocGhc (head ts)
-        (_ , endPos') = startEndLocGhc (last ts)
+  = let (startPos',_) = startEndLocGhc (ghead "getStartEndLoc2" ts)
+        (_ , endPos') = startEndLocGhc (glast "getStartEndLoc2" ts)
         locs = srcLocs ts
         (startPos,endPos) = (if startPos' == simpPos0 && locs /=[] then ghead "getStartEndLoc" locs
                                                                    else startPos',
@@ -1076,23 +1101,27 @@ extendBothSides  toks startLoc endLoc  forwardCondFun backwardCondFun
         in (firstLoc, lastLoc)
 -}
 
-extendForwards :: [PosToken] -> SimpPos -> SimpPos -> (PosToken -> Bool)
+-- |Extend the given position backwards to the front of the file while
+-- the supplied condition holds
+extendBackwards :: [PosToken] -> (SimpPos ,SimpPos) -> (PosToken -> Bool)
   -> (SimpPos,SimpPos)
-extendForwards toks startLoc endLoc forwardCondFun
-       =let toks1=takeWhile (\t->tokenPos t /= startLoc) toks
-            firstLoc=case (dropWhile (not.forwardCondFun) (reverse toks1)) of
-                       [] ->startLoc  -- is this the correct default?
-                       l -> (tokenPos.ghead "extendForwards") l
-        in (firstLoc, endLoc)
+extendBackwards toks (startLoc,endLoc) condFun
+    = let toks1 = takeWhile (\t->tokenPos t /= startLoc) toks
+          firstLoc = case (dropWhile (not.condFun) (reverse toks1)) of
+                       [] -> startLoc  -- is this the correct default?
+                       l  -> (tokenPos.ghead "extendBackwards") l
+      in (firstLoc, endLoc)
 
-extendBackwards :: [PosToken] -> SimpPos -> SimpPos -> (PosToken -> Bool)
+-- |Extend the given position forwards to the end of the file while
+-- the supplied condition holds
+extendForwards :: [PosToken] -> (SimpPos ,SimpPos) -> (PosToken -> Bool)
   -> (SimpPos,SimpPos)
-extendBackwards toks startLoc endLoc backwardCondFun
-       = let toks1= gtail "extendBackwards"  $ dropWhile (\t->tokenPos t /=endLoc) toks
-             lastLoc=case (dropWhile (not.backwardCondFun) toks1) of
+extendForwards toks (startLoc,endLoc) condFun
+    = let toks1 = gtail "extendForwards"  $ dropWhile (\t->tokenPosEnd t /= endLoc) toks
+          lastLoc = case (dropWhile (condFun) toks1) of
                           [] ->endLoc -- is this the correct default?
-                          l ->(tokenPos. ghead "extendBackwards") l
-         in (startLoc, lastLoc)
+                          l ->(tokenPos. ghead "extendForwards") l
+      in (startLoc, lastLoc)
 
 {-
 ------------------Some functions for associating comments with syntax phrases.---------------------------

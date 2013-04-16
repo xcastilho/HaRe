@@ -27,14 +27,16 @@ import Language.Haskell.Refact.Utils.TypeUtils
 -- ---------------------------------------------------------------------
 
 main :: IO ()
-main = hspec spec
+main = do
+  setLogger
+  hspec spec
 
 spec :: Spec
 spec = do
 
   describe "locToExp on ParsedSource" $ do
     it "finds the largest leftmost expression contained in a given region #1" $ do
-      (t, toks) <- parsedFileBGhc
+      (t, _toks) <- parsedFileBGhc
       let mod = GHC.pm_parsed_source $ GHC.tm_parsed_module t
 
       let (Just expr) = locToExp (7,7) (7,43) mod :: Maybe (GHC.Located (GHC.HsExpr GHC.RdrName))
@@ -43,7 +45,7 @@ spec = do
 
     it "finds the largest leftmost expression contained in a given region #2" $ do
       -- ((_, _, mod), toks) <- parsedFileBGhc
-      (t, toks) <- parsedFileBGhc
+      (t, _toks) <- parsedFileBGhc
       let mod = GHC.pm_parsed_source $ GHC.tm_parsed_module t
 
       let (Just expr) = locToExp (7,7) (7,41) mod :: Maybe (GHC.Located (GHC.HsExpr GHC.RdrName))
@@ -52,7 +54,7 @@ spec = do
 
     it "finds the largest leftmost expression in RenamedSource" $ do
       -- ((_, renamed, _), toks) <- parsedFileBGhc
-      (t, toks) <- parsedFileBGhc
+      (t, _toks) <- parsedFileBGhc
       let renamed = fromJust $ GHC.tm_renamed_source t
 
       let (Just expr) = locToExp (7,7) (7,41) renamed :: Maybe (GHC.Located (GHC.HsExpr GHC.Name))
@@ -73,7 +75,7 @@ spec = do
 
   describe "sameOccurrence" $ do
     it "checks that a given syntax element is the same occurrence as another" $ do
-      pending "write this test"
+      pending -- "write this test"
 
     it "gives the original list, if applied twice" $ property $
       \xs -> reverse (reverse xs) == (xs :: [Int])
@@ -110,13 +112,13 @@ spec = do
 
   describe "modIsExported" $ do
     it "needs a test or two" $ do
-      pending "write this test"
+      pending  -- "write this test"
 
   -- -------------------------------------------------------------------
 
   describe "clientModsAndFiles" $ do
     it "can only be called in a live RefactGhc session" $ do
-      pending "write this test"
+      pending  -- "write this test"
 
     it "gets modules which directly or indirectly import a module #1" $ do
       -- TODO: harvest this commonality
@@ -141,7 +143,7 @@ spec = do
 
   describe "serverModsAndFiles" $ do
     it "can only be called in a live RefactGhc session" $ do
-      pending "write this test"
+      pending  -- "write this test"
 
     it "gets modules which are directly or indirectly imported by a module #1" $ do
       let
@@ -178,7 +180,7 @@ spec = do
 
 
     it "gets the updated graph, after a refactor" $ do
-      pending "write this test"
+      pending -- "write this test"
 
   -- -------------------------------------------------------------------
 
@@ -199,24 +201,30 @@ spec = do
       let
         comp = do
           loadModuleGraphGhc $ Just "./test/testdata/M.hs"
-          m <- getModuleGhc "./test/testdata/S1.hs"
+          getModuleGhc "./test/testdata/S1.hs"
+          pr <- getTypecheckedModule
+          toks <- fetchOrigToks
           g <- clientModsAndFiles $ GHC.mkModuleName "S1"
 
-          return (m,g)
-      -- (( ( ((_,_,parsed),_)), mg ), _s) <- runRefactGhcState comp
+          return ((pr,toks),g)
+
       (( ( (t,_)), mg ), _s) <- runRefactGhcState comp
       let parsed = GHC.pm_parsed_source $ GHC.tm_parsed_module t
 
       (show $ getModuleName parsed) `shouldBe` "Just (S1,\"S1\")"
       GHC.showPpr (map GHC.ms_mod mg) `shouldBe` "[main:M2, main:M3, main:Main]"
 
+    -- ---------------------------------
+
     it "loads the module and dependents if no existing module graph" $ do
       let
         comp = do
-          m <- getModuleGhc "./test/testdata/S1.hs"
+          getModuleGhc "./test/testdata/S1.hs"
+          pr <- getTypecheckedModule
+          toks <- fetchOrigToks
           g <- clientModsAndFiles $ GHC.mkModuleName "S1"
 
-          return (m,g)
+          return ((pr,toks),g)
       -- (( ( ((_,_,parsed),_)), mg ), _s) <- runRefactGhcState comp
       (( ( (t,_)), mg ), _s) <- runRefactGhcState comp
       let parsed = GHC.pm_parsed_source $ GHC.tm_parsed_module t
@@ -224,14 +232,18 @@ spec = do
       (show $ getModuleName parsed) `shouldBe` "Just (S1,\"S1\")"
       GHC.showPpr (map GHC.ms_mod mg) `shouldBe` "[]"
 
+    -- ---------------------------------
+
     it "retrieves a module from an existing module graph #2" $ do
       let
         comp = do
           loadModuleGraphGhc $ Just "./test/testdata/DupDef/Dd2.hs"
-          m <- getModuleGhc "./test/testdata/DupDef/Dd1.hs"
+          getModuleGhc "./test/testdata/DupDef/Dd1.hs"
+          pr <- getTypecheckedModule
+          toks <- fetchOrigToks
           g <- clientModsAndFiles $ GHC.mkModuleName "DupDef.Dd1"
 
-          return (m,g)
+          return ((pr,toks),g)
       -- (( ( ((_,_,parsed),_)), mg ), _s) <- runRefactGhcState comp
       (( ( (t,_)), mg ), _s) <- runRefactGhcState comp
       let parsed = GHC.pm_parsed_source $ GHC.tm_parsed_module t
@@ -252,6 +264,23 @@ spec = do
                   ++",\"TypeUtils.C      ( test/testdata/TypeUtils/C.hs, interpreted )\"]")
 
 
+  -- -------------------------------------------------------------------
+
+  describe "RefactFlags" $ do
+    it "puts the RefactDone flag through its paces" $ do
+      let
+        comp = do
+          v1 <- getRefactDone
+          clearRefactDone
+          v2 <- getRefactDone
+          setRefactDone
+          v3 <- getRefactDone
+
+          return (v1,v2,v3)
+      ((v1',v2',v3'), _s) <- runRefactGhcState comp
+
+      (show (v1',v2',v3')) `shouldBe` "(False,False,True)"
+
 
 -- ---------------------------------------------------------------------
 -- Helper functions
@@ -266,12 +295,12 @@ parsedFileMGhc :: IO (ParseResult,[PosToken])
 parsedFileMGhc = parsedFileGhc "./test/testdata/M.hs"
 
 parseFileBGhc :: RefactGhc (ParseResult, [PosToken])
-parseFileBGhc = parseSourceFileGhc fileName
+parseFileBGhc = parseSourceFileTest fileName
   where
     fileName = "./test/testdata/TypeUtils/B.hs"
 
 parseFileMGhc :: RefactGhc (ParseResult, [PosToken])
-parseFileMGhc = parseSourceFileGhc fileName
+parseFileMGhc = parseSourceFileTest fileName
   where
     fileName = "./test/testdata/M.hs"
 
@@ -283,7 +312,7 @@ parsedFileNoMod = parsedFileGhc fileName
 comp :: RefactGhc String
 comp = do
     s <- get
-    modInfo@(t, toks) <- parseSourceFileGhc "./test/testdata/TypeUtils/B.hs"
+    modInfo@(t, toks) <- parseSourceFileTest "./test/testdata/TypeUtils/B.hs"
 
     g <- GHC.getModuleGraph
     gs <- mapM GHC.showModule g

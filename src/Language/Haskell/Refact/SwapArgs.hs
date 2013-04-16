@@ -37,14 +37,15 @@ swapArgs args
   = do let fileName = args!!0
            row = (read (args!!1)::Int)
            col = (read (args!!2)::Int)
-       runRefacSession Nothing (comp Nothing fileName (row,col))
+       runRefacSession Nothing Nothing (comp fileName (row,col))
 
 
-comp :: Maybe FilePath -> String -> SimpPos
+comp :: String -> SimpPos
      -> RefactGhc [ApplyRefacResult]
-comp maybeMainFile fileName (row, col) = do
-       loadModuleGraphGhc maybeMainFile
-       modInfo@(_t, _tokList) <- getModuleGhc fileName
+comp fileName (row, col) = do
+       -- loadModuleGraphGhc maybeMainFile
+       -- modInfo@(_t, _tokList) <- getModuleGhc fileName
+       getModuleGhc fileName
        renamed <- getRefactRenamed
        -- parsed  <- getRefactParsed
        -- modInfo@((_, renamed, mod), toks) <- parseSourceFileGhc fileName
@@ -56,7 +57,8 @@ comp maybeMainFile fileName (row, col) = do
        -- error (SYB.showData SYB.Parser 0 name)
 
        case name of
-            (Just pn) -> do refactoredMod@(_, (_t, s)) <- applyRefac (doSwap pnt pn) (Just modInfo) fileName
+            -- (Just pn) -> do refactoredMod@(_, (_t, s)) <- applyRefac (doSwap pnt pn) (Just modInfo) fileName
+            (Just pn) -> do (refactoredMod@(_, (_t, s)),_) <- applyRefac (doSwap pnt pn) (RSFile fileName)
                             return [refactoredMod]
             Nothing   -> error "Incorrect identifier selected!"
        --if isFunPNT pnt mod    -- Add this back in ++ CMB +++
@@ -91,7 +93,7 @@ reallyDoSwap _pnt@(PNT (GHC.L _ _)) _name@(GHC.L s n1) renamed = do
          -- 1. The definition is at top level...
          inMod (_func@(GHC.FunBind (GHC.L x n2) infixity (GHC.MatchGroup matches p) a locals tick)::(GHC.HsBindLR GHC.Name GHC.Name ))
             | GHC.nameUnique n1 == GHC.nameUnique n2
-                    = do liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Parser 0 (GHC.L x n2) ++ "<")
+                    = do logm ("inMatch>" ++ SYB.showData SYB.Parser 0 (GHC.L x n2) ++ "<")
                          newMatches <- updateMatches matches
                          return (GHC.FunBind (GHC.L x n2) infixity (GHC.MatchGroup newMatches p) a locals tick)
          inMod func = return func
@@ -135,7 +137,7 @@ reallyDoSwap _pnt@(PNT (GHC.L _ _)) _name@(GHC.L s n1) renamed = do
 {-        inMatch i@(GHC.L x m@(GHC.Match (p1:p2:ps) nothing rhs)::GHC.Located (GHC.Match GHC.RdrName) )
 		  -- = error (SYB.showData SYB.Parser 0 pnt)
             | GHC.srcSpanStart s == GHC.srcSpanStart x
-              = do liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Parser 0 (p1:p2:ps) ++ "<")
+              = do logm ("inMatch>" ++ SYB.showData SYB.Parser 0 (p1:p2:ps) ++ "<")
                    p1' <- update p1 p2 p1 --pats
                    p2' <- update p2 p1 p2
                    return (GHC.L x (GHC.Match (p1':p2':ps) nothing rhs))

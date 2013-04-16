@@ -40,15 +40,16 @@ doDuplicateDef args
 -- | The API entry point
 duplicateDef :: Maybe RefactSettings -> Maybe FilePath -> FilePath -> String -> SimpPos -> IO ()
 duplicateDef settings maybeMainFile fileName newName (row,col) =
-  runRefacSession settings (comp maybeMainFile fileName newName (row,col))
+  runRefacSession settings maybeMainFile (comp fileName newName (row,col))
 
 
-comp :: Maybe FilePath -> FilePath -> String -> SimpPos
+comp :: FilePath -> String -> SimpPos
      -> RefactGhc [ApplyRefacResult]
-comp maybeMainFile fileName newName (row, col) = do
+comp fileName newName (row, col) = do
       if isVarId newName
-        then do loadModuleGraphGhc maybeMainFile
-                modInfo@(t, _tokList) <- getModuleGhc fileName
+        then do -- loadModuleGraphGhc maybeMainFile
+                -- modInfo@(t, _tokList) <- getModuleGhc fileName
+                getModuleGhc fileName
                 renamed <- getRefactRenamed
                 parsed  <- getRefactParsed
 
@@ -57,14 +58,15 @@ comp maybeMainFile fileName newName (row, col) = do
                 case maybePn of
                   Just pn ->
                        do
-                          refactoredMod@((_fp,ismod),(_toks',renamed')) <- applyRefac (doDuplicating pn newName) (Just modInfo) fileName
+                          -- refactoredMod@((_fp,ismod),(_toks',renamed')) <- applyRefac (doDuplicating pn newName) (Just modInfo) fileName
+                          (refactoredMod@((_fp,ismod),(_toks',renamed')),_) <- applyRefac (doDuplicating pn newName) (RSFile fileName)
                           case (ismod) of
                             False -> error "The selected identifier is not a function/simple pattern name, or is not defined in this module "
                             True -> return ()
 
                           if modIsExported parsed
                            then do clients <- clientModsAndFiles modName
-                                   liftIO $ putStrLn ("DupDef: clients=" ++ (GHC.showPpr clients)) -- ++AZ++ debug
+                                   logm ("DupDef: clients=" ++ (GHC.showPpr clients)) -- ++AZ++ debug
                                    refactoredClients <- mapM (refactorInClientMod modName 
                                                              (findNewPName newName renamed')) clients
                                    return $ refactoredMod:refactoredClients
@@ -153,8 +155,8 @@ reallyDoDuplicating pn newName inscopes renamed = do
                 -- TODO: Where definition is of form tup@(h,t), test each element of it for clashes, or disallow
                 nameAlreadyInScope <- isInScopeAndUnqualifiedGhc newName
 
-                -- liftIO $ putStrLn ("DupDef: nameAlreadyInScope =" ++ (show nameAlreadyInScope)) -- ++AZ++ debug
-                liftIO $ putStrLn ("DupDef: ln =" ++ (show ln)) -- ++AZ++ debug
+                -- logm ("DupDef: nameAlreadyInScope =" ++ (show nameAlreadyInScope)) -- ++AZ++ debug
+                logm ("DupDef: ln =" ++ (show ln)) -- ++AZ++ debug
 
                 if elem newName vars || (nameAlreadyInScope && findEntity ln duplicatedDecls) 
                    then error ("The new name'"++newName++"' will cause name clash/capture or ambiguity problem after "
@@ -185,29 +187,31 @@ refactorInClientMod :: GHC.ModuleName -> GHC.Name -> GHC.ModSummary
                     -> RefactGhc ApplyRefacResult
 refactorInClientMod serverModName newPName modSummary
   = do
-       liftIO $ putStrLn ("refactorInClientMod: (serverModName,newPName)=" ++ (GHC.showPpr (serverModName,newPName))) -- ++AZ++ debug
+       logm ("refactorInClientMod: (serverModName,newPName)=" ++ (GHC.showPpr (serverModName,newPName))) -- ++AZ++ debug
        let fileName = gfromJust "refactorInClientMod" $ GHC.ml_hs_file $ GHC.ms_location modSummary
-       modInfo@(t,ts) <- getModuleGhc fileName
+       -- modInfo@(t,ts) <- getModuleGhc fileName
+       getModuleGhc fileName
 
        renamed <- getRefactRenamed
        parsed <- getRefactParsed
 
        let modNames = willBeUnQualImportedBy serverModName renamed
-       liftIO $ putStrLn ("refactorInClientMod: (modNames)=" ++ (GHC.showPpr (modNames))) -- ++AZ++ debug
+       logm ("refactorInClientMod: (modNames)=" ++ (GHC.showPpr (modNames))) -- ++AZ++ debug
 
        -- if isJust modNames && needToBeHided (pNtoName newPName) exps parsed
        mustHide <- needToBeHided newPName renamed parsed
-       liftIO $ putStrLn ("refactorInClientMod: (mustHide)=" ++ (GHC.showPpr (mustHide))) -- ++AZ++ debug
+       logm ("refactorInClientMod: (mustHide)=" ++ (GHC.showPpr (mustHide))) -- ++AZ++ debug
        if isJust modNames && mustHide
         then do
-                refactoredMod <- applyRefac (doDuplicatingClient serverModName [newPName]) (Just modInfo) fileName
+                -- refactoredMod <- applyRefac (doDuplicatingClient serverModName [newPName]) (Just modInfo) fileName
+                (refactoredMod,_) <- applyRefac (doDuplicatingClient serverModName [newPName]) (RSFile fileName)
                 return refactoredMod
-        else return ((fileName,unmodified),(ts,renamed))
+        else return ((fileName,unmodified),([],renamed))
    where
      needToBeHided :: GHC.Name -> GHC.RenamedSource -> GHC.ParsedSource -> RefactGhc Bool
      needToBeHided name exps parsed = do
          let usedUnqual = usedWithoutQualR name parsed
-         liftIO $ putStrLn ("refactorInClientMod: (usedUnqual)=" ++ (GHC.showPpr (usedUnqual))) -- ++AZ++ debug
+         logm ("refactorInClientMod: (usedUnqual)=" ++ (GHC.showPpr (usedUnqual))) -- ++AZ++ debug
          return $ usedUnqual || causeNameClashInExports name serverModName exps
 
 
