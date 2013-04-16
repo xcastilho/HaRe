@@ -31,6 +31,7 @@ import qualified RdrName               as GHC
 import qualified OccName               as GHC
 import qualified SrcLoc                as GHC
 import qualified Module                as GHC
+import Var
 import NameSet
 
 import GHC.Paths ( libdir )
@@ -65,11 +66,13 @@ comp :: Maybe FilePath -> String -> SimpPos
 comp maybeMainFile fileName (row, col) = do
        loadModuleGraphGhc maybeMainFile
        modInfo@(t, _tokList) <- getModuleGhc fileName
+       checkedModule <- getTypecheckedModule
+       let typeChecked = GHC.tm_typechecked_source checkedModule
        renamed <- getRefactRenamed
        parsed  <- getRefactParsed
 
        -- 1) get variable name
-       let pnt = locToPNT (GHC.mkFastString fileName) (row, col) renamed
+       let pnt  = locToPNT (GHC.mkFastString fileName) (row, col) renamed
        let name = locToName (GHC.mkFastString fileName) (row, col) renamed
        -- error (SYB.showData SYB.Parser 0 name)
 
@@ -96,11 +99,12 @@ doTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n) = do
     inscopes <- getRefactInscopes
     renamed  <- getRefactRenamed
     parsed   <- getRefactParsed
-    reallyDoTransact pnt name renamed
+    typechecked <- liftM GHC.tm_typechecked_source getTypecheckedModule -- >>= (return.GHC.tm_typechecked_source)
+    reallyDoTransact pnt name renamed typechecked
 
 
-reallyDoTransact :: PNT -> GHC.Located GHC.Name -> GHC.RenamedSource -> RefactGhc ()
-reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed = do
+reallyDoTransact :: PNT -> GHC.Located GHC.Name -> GHC.RenamedSource -> GHC.TypecheckedSource-> RefactGhc ()
+reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed typechecked = do
 
     -- TODO: Add import declaration for STM module, if it doesn't exists.
     --newImports <- addImportDecl stmModuleName (renamedImports renamed)
@@ -112,6 +116,12 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed = do
 
     -- 2) get its binding(s)
     let binding      = listifyStaged SYB.Renamer (isDesiredBinding n1) renamed
+
+    let mainbind     = ghead "bindings" binding
+
+    let typecheckedVars = listifyStaged SYB.TypeChecker (isOkVar n1) typechecked 
+    liftIO $ putStrLn ("checkedVarsfound:: "++ show (map (SYB.showData SYB.TypeChecker 0 . varType) typecheckedVars)) --SYB.showData SYB.TypeChecker 0 typecheckedVars )
+
     -- 3) get its applications
     let applications = listifyStaged SYB.Renamer (isDesiredApplication n1) renamed
 
@@ -180,6 +190,8 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed = do
               | GHC.nameUnique n1 == GHC.nameUnique n2
                 = do
                     liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Parser 0 bindSt ++ "<")
+                    let typeOfPattern = typeOf (GHC.VarPat n2)
+                    liftIO $ putStrLn $ SYB.showData SYB.Parser 0 typeOfPattern
                     newName <- translateFunction nv
                     newf <- newFuncName oldf newName
                     updateToks oldf newf GHC.showPpr False
@@ -190,6 +202,7 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed = do
               | GHC.nameUnique n1 == GHC.nameUnique n2
                 = do
                     liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Parser 0 bindSt ++ "<")
+                    let typeOfPattern = typeOf (GHC.VarPat n2)
                     newName <- translateFunction nv
                     let newf = GHC.L l $ GHC.HsApp (GHC.L y (GHC.HsVar newName)) exp2
                     updateToks oldf newf GHC.showPpr False
@@ -268,6 +281,23 @@ rmPreludeImports = filter isPrelude where
 prettyprint :: (GHC.Outputable a) => a -> String
 prettyprint  = GHC.showPpr 
 
+
+-- | Gets the Located VarPat from a BindStmt, or errors if not a VarPat BindStmt.
+getLVarPat :: GHC.StmtLR a a -> GHC.LPat a
+getLVarPat (GHC.BindStmt loc@(GHC.L _ (GHC.VarPat _)) _ _ _) = loc
+getLVarPat _ = error "Not a Var binding."
+
+getNameLPat :: GHC.LPat GHC.Name -> GHC.Name
+getNameLPat (GHC.L _ (GHC.VarPat name)) = name
+getNameLPat _ = error "Not a Var pattern."
+
+isTyVarTy :: GHC.Type -> Bool
+isTyVarTy = undefined --(TypeRep.TyVarTy _) = True
+--isTyVarTy _ = False
+
+isOkVar :: GHC.Name -> Var -> Bool
+isOkVar name variable = GHC.nameUnique name == GHC.nameUnique ( varName variable ) 
+
 -- filter for 2) get its binding(s)
 isDesiredBinding :: GHC.Name -> GHC.StmtLR GHC.Name GHC.Name -> Bool
 isDesiredBinding n1 ((GHC.BindStmt
@@ -329,6 +359,12 @@ translateFunction n =
         "GHC.MVar.putMVar"      -> "putTMVar"
         "GHC.MVar.newEmptyMVar" -> "newEmptyTMVarIO"
         "GHC.MVar.newMVar"      -> "newTMVarIO"
+        "GHC.MVar.tryTakeMVar"  -> "tryTakeTMVar"
+        "GHC.MVar.tryPutMVar"   -> "tryPutTMVar"
+        "GHC.MVar.isEmptyMVar"  -> "isEmptyTMVar"
+        "Control.Concurrent.MVar.readMVar" -> "readTMVar"
+        "Control.Concurrent.MVar.swapMVar" -> "swapTMVar"
+
         _                       -> nameToString n
 
 -- | Translates the calling function from this HsApp.
