@@ -55,7 +55,7 @@ import Debug.Trace
 
 transact :: [String] -> IO ()
 transact args = do
-    runRefacSession Nothing (comp Nothing fileName (row,col))
+    runRefacSession Nothing Nothing (comp Nothing fileName (row,col))
     return () where
         fileName = ghead "filename" args
         row = read (args!!1)::Int
@@ -65,7 +65,8 @@ comp :: Maybe FilePath -> String -> SimpPos
      -> RefactGhc [ApplyRefacResult]	
 comp maybeMainFile fileName (row, col) = do
        loadModuleGraphGhc maybeMainFile
-       modInfo@(t, _tokList) <- getModuleGhc fileName
+       --modInfo@(t, _tokList) <- getModuleGhc fileName
+       getModuleGhc fileName
        checkedModule <- getTypecheckedModule
        let typeChecked = GHC.tm_typechecked_source checkedModule
        renamed <- getRefactRenamed
@@ -77,8 +78,10 @@ comp maybeMainFile fileName (row, col) = do
        -- error (SYB.showData SYB.Parser 0 name)
 
        case name of
-            (Just pn) -> do refactoredMod@(_, (t, s)) <- applyRefac (doTransact pnt pn) (Just modInfo) fileName
-                            return [refactoredMod]
+            (Just pn) -> do 
+--                refactoredMod@(_, (t, s)) <- applyRefac (doTransact pnt pn) (Just modInfo) fileName
+                (refactoredMod@(_, (t, s)), _) <- applyRefac (doTransact pnt pn) (RSFile fileName)
+                return [refactoredMod]
             Nothing   -> error "Incorrect identifier selected!"
        --if isFunPNT pnt mod    -- Add this back in ++ CMB +++
        -- then do
@@ -121,6 +124,7 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed typechecked = d
 
     let typecheckedVars = listifyStaged SYB.TypeChecker (isOkVar n1) typechecked 
     liftIO $ putStrLn ("checkedVarsfound:: "++ show (map (SYB.showData SYB.TypeChecker 0 . varType) typecheckedVars)) --SYB.showData SYB.TypeChecker 0 typecheckedVars )
+
 
     -- 3) get its applications
     let applications = listifyStaged SYB.Renamer (isDesiredApplication n1) renamed
@@ -189,7 +193,7 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed typechecked = d
             oldf@(GHC.L y (GHC.HsVar nv)) z w )::(GHC.StmtLR GHC.Name GHC.Name))
               | GHC.nameUnique n1 == GHC.nameUnique n2
                 = do
-                    liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Parser 0 bindSt ++ "<")
+--                    liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Renamer 0 bindSt ++ "<")
                     let typeOfPattern = typeOf (GHC.VarPat n2)
                     liftIO $ putStrLn $ SYB.showData SYB.Parser 0 typeOfPattern
                     newName <- translateFunction nv
@@ -201,7 +205,7 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed typechecked = d
             oldf@(GHC.L l (GHC.HsApp (GHC.L y (GHC.HsVar nv)) exp2 )) z w )::(GHC.StmtLR GHC.Name GHC.Name))
               | GHC.nameUnique n1 == GHC.nameUnique n2
                 = do
-                    liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Parser 0 bindSt ++ "<")
+--                    liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Renamer 0 bindSt ++ "<")
                     let typeOfPattern = typeOf (GHC.VarPat n2)
                     newName <- translateFunction nv
                     let newf = GHC.L l $ GHC.HsApp (GHC.L y (GHC.HsVar newName)) exp2
@@ -410,9 +414,10 @@ realSrcSpan (GHC.RealSrcSpan rssp) = rssp
 realSrcSpan _ = error "SrcSpan is not real"
 
 -- ===========================
--- SYB temp
+-- SYB temp - moved to GhcUtils
 -- ===========================
 
+{- 
 -- | Checks whether the current item is undesirable for analysis in the current
 -- AST Stage.
 checkItemStage :: Typeable a => SYB.Stage -> a -> Bool
@@ -437,7 +442,7 @@ everythingStaged stage k z f x
 -- The stage must be provided to avoid trying to modify elements which
 -- may not be present at all stages of AST processing.
 listifyStaged stage p = everythingStaged stage (++) [] ([] `SYB.mkQ` (\x -> [ x | p x ]))
-
+-}
 
 {-        inMatch i@(GHC.L x m@(GHC.Match (p1:p2:ps) nothing rhs)::GHC.Located (GHC.Match GHC.RdrName) )
 		  -- = error (SYB.showData SYB.Parser 0 pnt)
