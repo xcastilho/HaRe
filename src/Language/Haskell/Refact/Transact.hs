@@ -451,6 +451,7 @@ realSrcSpan _ = error "SrcSpan is not real"
 -- SYB temp
 -- ===========================
 
+{-
 -- | Checks whether the current item is undesirable for analysis in the current
 -- AST Stage.
 checkItemStage stage x = (const False `SYB.extQ` postTcType `SYB.extQ` fixity `SYB.extQ` nameSet) x
@@ -475,7 +476,7 @@ everythingStaged stage k z f x
 -- may not be present at all stages of AST processing.
 listifyStaged stage p = everythingStaged stage (++) [] ([] `SYB.mkQ` (\x -> [ x | p x ]))
 
-
+-}
 
 
 
