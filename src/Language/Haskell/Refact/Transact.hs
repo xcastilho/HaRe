@@ -63,7 +63,7 @@ import Debug.Trace
 
 transact :: [String] -> IO ()
 transact args = do
-    runRefacSession Nothing (comp Nothing fileName (row,col))
+    runRefacSession Nothing Nothing (comp Nothing fileName (row,col))
     return () where
         fileName = ghead "filename" args
         row = read (args!!1)::Int
@@ -73,7 +73,8 @@ comp :: Maybe FilePath -> String -> SimpPos
      -> RefactGhc [ApplyRefacResult]	
 comp maybeMainFile fileName (row, col) = do
        loadModuleGraphGhc maybeMainFile
-       modInfo@(t, _tokList) <- getModuleGhc fileName
+       --modInfo@(t, _tokList) <- getModuleGhc fileName
+       getModuleGhc fileName
        renamed <- getRefactRenamed
        parsed  <- getRefactParsed
        -- modInfo@((_, renamed, mod), toks) <- parseSourceFileGhc fileName
@@ -86,7 +87,7 @@ comp maybeMainFile fileName (row, col) = do
        -- error (SYB.showData SYB.Parser 0 name)
 
        case name of
-            (Just pn) -> do refactoredMod@(_, (t, s)) <- applyRefac (doTransact pnt pn) (Just modInfo) fileName
+            (Just pn) -> do (refactoredMod@(_, (t, s)), _) <- applyRefac (doTransact pnt pn) (RSFile fileName)
                             return [refactoredMod]
             Nothing   -> error "Incorrect identifier selected!"
        --if isFunPNT pnt mod    -- Add this back in ++ CMB +++
