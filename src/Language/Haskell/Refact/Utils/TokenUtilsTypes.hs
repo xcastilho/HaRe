@@ -8,20 +8,22 @@
 module Language.Haskell.Refact.Utils.TokenUtilsTypes(
        Entry(..)
        , ForestLine(..)
-       , ForestSpan(..)
+       , ForestPos
+       , ForestSpan
+       , TreeId(..)
+       , TokenCache(..)
+       , mainTid
        ) where
 
-import qualified SrcLoc        as GHC
 import Language.Haskell.Refact.Utils.TypeSyn
-
+import Data.Tree
+import qualified Data.Map as Map
 
 -- ---------------------------------------------------------------------
 
 {-
 
 Structure is to be indexed by SrcSpan.
-
-Memo-ised.
 
 Must be recursive, so if one srcspan is requested that contains a
 modified sub-src span, the modified one is returned.
@@ -50,18 +52,54 @@ Invariants:
 -- | An entry in the data structure for a particular srcspan.
 data Entry = Entry ForestSpan -- ^The source span contained in this Node
                    [PosToken] -- ^The tokens for the SrcSpan if subtree is empty
+--             deriving (Show)
 
 -- ---------------------------------------------------------------------
 
 data ForestLine = ForestLine
-                  { flInsertVersion :: Int
+                  { flSpanLengthChanged :: Bool -- ^The length of the
+                                                -- span may have
+                                                -- changed due to
+                                                -- updated tokens.
+                  , flTreeSelector :: Int
+                  , flInsertVersion :: Int
                   , flLine :: Int
-                  } deriving (Eq,Show)
+                  } -- deriving (Eq)
+
+instance Eq ForestLine where
+  -- TODO: make this undefined, and patch all broken code to use the
+  --       specific fun here directly instead.
+  (ForestLine _ s1 v1 l1) == (ForestLine _ s2 v2 l2) = s1 == s2 && v1 == v2 && l1 == l2
+
+instance Show ForestLine where
+  show s = "(ForestLine " ++ (show $ flSpanLengthChanged s)
+         ++ " " ++ (show $ flTreeSelector s)
+         ++ " " ++ (show $ flInsertVersion s)
+         ++ " " ++ (show $ flLine s)
+         ++ ")"
+
 
 -- ---------------------------------------------------------------------
 
+type ForestPos = (ForestLine,Int)
+
+
 -- |Match a SrcSpan, using a ForestLine as the marker
-type ForestSpan = ((ForestLine, Int),(ForestLine, Int)) 
+type ForestSpan = (ForestPos,ForestPos)
+
+-- ---------------------------------------------------------------------
+
+data TreeId = TId Int deriving (Eq,Ord,Show)
+
+-- |Identifies the tree carrying the main tokens, not any work in
+-- progress or deleted ones
+mainTid :: TreeId
+mainTid = TId 0
+
+data TokenCache = TK
+  { tkCache :: Map.Map TreeId (Tree Entry)
+  , tkLastTreeId :: TreeId
+  }
 
 -- ---------------------------------------------------------------------
 

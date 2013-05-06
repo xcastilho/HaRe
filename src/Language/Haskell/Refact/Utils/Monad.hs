@@ -1,17 +1,23 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Language.Haskell.Refact.Utils.Monad
        ( ParseResult
        -- , RefactResult
        , RefactSettings(..)
        , RefactState(..)
        , RefactModule(..)
+       , RefactStashId(..)
        , RefactFlags(..)
+       , StateStorage(..)
        -- , initRefactModule
        -- GHC monad stuff
        , RefactGhc
        , runRefactGhc
        , getRefacSettings
+       , defaultSettings
+       , logSettings
 
        {- ++AZ++ moved to MonadUtils, to break import cycle
        -- * Conveniences for state access
@@ -68,19 +74,30 @@ import Language.Haskell.Refact.Utils.TokenUtilsTypes
 import Language.Haskell.Refact.Utils.TypeSyn
 
 import Data.Tree
+import qualified Data.Map as Map
 
 -- ---------------------------------------------------------------------
 
 data RefactSettings = RefSet
         { rsetImportPath :: [FilePath]
+        -- , rsetLogFileName :: Maybe FilePath
+        , rsetLoggingOn :: Bool
         } deriving (Show)
 
+defaultSettings :: RefactSettings
+defaultSettings = RefSet ["."] False
+
+logSettings :: RefactSettings
+logSettings = defaultSettings { rsetLoggingOn = True }
+
+
+data RefactStashId = Stash String deriving (Show,Eq,Ord)
+
 data RefactModule = RefMod
-        { rsTypecheckedMod :: GHC.TypecheckedModule
+        { rsTypecheckedMod  :: GHC.TypecheckedModule
         , rsOrigTokenStream :: [PosToken]  -- ^Original Token stream for the current module
-        -- , rsTokenStream     :: [PosToken]  -- ^Token stream for the current module, maybe modified
-        , rsTokenCache :: Tree Entry -- ^Token stream for the current module, maybe modified, in SrcSpan tree form
-        , rsStreamModified :: Bool     -- ^current module has updated the token stream
+        , rsTokenCache      :: TokenCache  -- ^Token stream for the current module, maybe modified, in SrcSpan tree form
+        , rsStreamModified  :: Bool        -- ^current module has updated the token stream
         }
 
 data RefactFlags = RefFlags
@@ -90,11 +107,12 @@ data RefactFlags = RefFlags
 -- | State for refactoring a single file. Holds/hides the token
 -- stream, which gets updated transparently at key points.
 data RefactState = RefSt
-        { rsSettings :: RefactSettings -- ^Session level settings
+        { rsSettings  :: RefactSettings -- ^Session level settings
         , rsUniqState :: Int -- ^ Current Unique creator value, incremented every time it is used
-        , rsFlags :: RefactFlags -- ^ Flags for controlling generic traversals
-        -- The current module being refactored
-        , rsModule :: Maybe RefactModule
+        , rsFlags     :: RefactFlags -- ^ Flags for controlling generic traversals
+        , rsStorage   :: StateStorage -- ^Temporary storage of values
+                                      -- while refactoring takes place
+        , rsModule    :: Maybe RefactModule -- ^The current module being refactored
         }
 
 -- |Result of parsing a Haskell source file. The first element in the
@@ -103,6 +121,16 @@ data RefactState = RefSt
 -- change as we learn more
 type ParseResult = GHC.TypecheckedModule
 
+-- |Provide some temporary storage while the refactoring is taking
+-- place
+data StateStorage = StorageNone
+                  | StorageBind (GHC.LHsBind GHC.Name)
+                  | StorageSig (GHC.LSig GHC.Name)
+
+instance Show StateStorage where
+  show StorageNone        = "StorageNone"
+  show (StorageBind bind) = "(StorageBind " ++ (GHC.showPpr bind) ++ ")"
+  show (StorageSig sig)   = "(StorageSig " ++ (GHC.showPpr sig) ++ ")"
 
 -- ---------------------------------------------------------------------
 -- StateT and GhcT stack
@@ -120,6 +148,7 @@ instance ExceptionMonad m => ExceptionMonad (StateT s m) where
     gblock = mapStateT gblock
     gunblock = mapStateT gunblock
 
+
 instance (MonadState RefactState (GHC.GhcT (StateT RefactState IO))) where
     get = lift get
     put = lift . put
@@ -128,28 +157,10 @@ instance (MonadState RefactState (GHC.GhcT (StateT RefactState IO))) where
 instance (MonadTrans GHC.GhcT) where
    lift = GHC.liftGhcT
 
-{-
-instance MonadPlus (RefactGhc a) where
-   mzero = RefactGhc (StateT(\ st -> mzero))
+instance (MonadPlus m,Functor m,GHC.MonadIO m,ExceptionMonad m) => MonadPlus (GHC.GhcT m) where
+  mzero = GHC.GhcT $ \s -> mzero
+  x `mplus` y = GHC.GhcT $ \s -> (GHC.runGhcT (Just GHC.libdir) x) `mplus` (GHC.runGhcT (Just GHC.libdir) y)
 
-   -- x `mplus` y =  RefactGhc (StateT ( \ st -> runRefact x st `mplus` runRefact y st))  
-   -- ^Try one of the refactorings, x or y, with the same state plugged in
--}
-
-{-
-instance (MonadPlus (GHC.GhcT (StateT RefactState IO))) where
-  mzero = lift mzero
-
-  -- For somewhereMStaged to work, the b leg should only be evaluated
-  -- if the a leg is mzero
-  mplus a b = do
-                a' <- a 
-                case a' of
-                  mzero -> do
-                            b'  <- b
-                            return b'
-                  _ -> return a'
--}
 
 runRefactGhc ::
   RefactGhc a -> RefactState -> IO (a, RefactState)
@@ -160,98 +171,6 @@ getRefacSettings :: RefactGhc RefactSettings
 getRefacSettings = do
   s <- get
   return (rsSettings s)
-
--- ---------------------------------------------------------------------
-{- ++AZ++ moved to MonadFunctions, to break import cycle
-
-
-fetchToks :: RefactGhc [PosToken]
-fetchToks = do
-  Just tm <- gets rsModule
-  return $ rsTokenStream tm
-
-fetchOrigToks :: RefactGhc [PosToken]
-fetchOrigToks = do
-  Just tm <- gets rsModule
-  return $ rsOrigTokenStream tm
-
-putToks :: [PosToken] -> Bool -> RefactGhc ()
-putToks toks isModified = do
-  st <- get
-  let Just tm = rsModule st
-  let rsModule' = Just (tm {rsTokenStream = toks, rsStreamModified = isModified})
-  put $ st { rsModule = rsModule' }
-
--- ---------------------------------------------------------------------
-
-getTypecheckedModule :: RefactGhc GHC.TypecheckedModule
-getTypecheckedModule = do
-  Just tm <- gets rsModule
-  return $ rsTypecheckedMod tm
-
-getRefactStreamModified :: RefactGhc Bool
-getRefactStreamModified = do
-  Just tm <- gets rsModule
-  return $ rsStreamModified tm
-
-getRefactInscopes :: RefactGhc InScopes
-getRefactInscopes = GHC.getNamesInScope
-
-getRefactRenamed :: RefactGhc GHC.RenamedSource
-getRefactRenamed = do
-  mtm <- gets rsModule
-  let tm = gfromJust "getRefactRenamed" mtm
-  return $ gfromJust "getRefactRenamed2" $ GHC.tm_renamed_source $ rsTypecheckedMod tm
-
-putRefactRenamed :: GHC.RenamedSource -> RefactGhc ()
-putRefactRenamed renamed = do
-  st <- get
-  mrm <- gets rsModule
-  let rm = gfromJust "putRefactRenamed" mrm
-  let tm = rsTypecheckedMod rm
-  let tm' = tm { GHC.tm_renamed_source = Just renamed }
-  let rm' = rm { rsTypecheckedMod = tm' }
-  put $ st {rsModule = Just rm'}
-
-getRefactParsed :: RefactGhc GHC.ParsedSource
-getRefactParsed = do
-  mtm <- gets rsModule
-  let tm = gfromJust "getRefactParsed" mtm
-  let t  = rsTypecheckedMod tm
-
-  let pm = GHC.tm_parsed_module t
-  return $ GHC.pm_parsed_source pm
-
-putParsedModule
-  :: GHC.TypecheckedModule -> [PosToken] -> RefactGhc ()
-putParsedModule tm toks = do
-  st <- get
-  put $ st { rsModule = initRefactModule tm toks }
-
-clearParsedModule :: RefactGhc ()
-clearParsedModule = do
-  st <- get
-  put $ st { rsModule = Nothing }
-
-
--- ---------------------------------------------------------------------
-
-getRefactDone :: RefactGhc Bool
-getRefactDone = do
-  flags <- gets rsFlags
-  return (rsDone flags)
-
-setRefactDone :: RefactGhc ()
-setRefactDone = do
-  st <- get
-  put $ st { rsFlags = RefFlags True }
-
-clearRefactDone :: RefactGhc ()
-clearRefactDone = do
-  st <- get
-  put $ st { rsFlags = RefFlags False }
-
-++AZ++ end of move to MonadFunctions -}
 
 -- ---------------------------------------------------------------------
 -- ++AZ++ trying to wrap this in GhcT, or vice versa
