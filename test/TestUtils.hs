@@ -4,11 +4,13 @@ module TestUtils
        , parseSourceFileTest
        , runRefactGhcState
        , initialState
+       , initialLogOnState
        , toksFromState
        , defaultTestSettings
        , logTestSettings
        , catchException
        , mkTokenCache
+       , hex
 
        , setLogger
        ) where
@@ -30,11 +32,18 @@ import Language.Haskell.Refact.Utils.MonadFunctions
 import Language.Haskell.Refact.Utils.TokenUtils
 import Language.Haskell.Refact.Utils.TokenUtilsTypes
 import Language.Haskell.Refact.Utils.TypeSyn
+import Numeric
 
 import Data.Tree
 import System.Log.Handler.Simple
 import System.Log.Logger
 import qualified Data.Map as Map
+
+
+-- ---------------------------------------------------------------------
+
+hex :: Int -> String
+hex v = "0x" ++ showHex v ""
 
 -- ---------------------------------------------------------------------
 
@@ -69,7 +78,18 @@ parseSourceFileTest fileName = do
 
 initialState :: RefactState
 initialState = RefSt
-  { rsSettings = RefSet ["./test/testdata/"] False
+  { rsSettings = RefSet ["./test/testdata/","./testdata"] False
+  , rsUniqState = 1
+  , rsFlags = RefFlags False
+  , rsStorage = StorageNone
+  , rsModule = Nothing
+  }
+
+-- ---------------------------------------------------------------------
+
+initialLogOnState :: RefactState
+initialLogOnState = RefSt
+  { rsSettings = RefSet ["./test/testdata/"] True
   , rsUniqState = 1
   , rsFlags = RefFlags False
   , rsStorage = StorageNone
@@ -81,7 +101,8 @@ initialState = RefSt
 toksFromState :: RefactState -> [PosToken]
 toksFromState st =
   case (rsModule st) of
-    Just tm -> retrieveTokens $ (tkCache $ rsTokenCache tm) Map.! mainTid
+    -- Just tm -> retrieveTokens $ (tkCache $ rsTokenCache tm) Map.! mainTid
+    Just tm -> retrieveTokensFinal $ (tkCache $ rsTokenCache tm) Map.! mainTid
     Nothing -> []
 
 -- ---------------------------------------------------------------------

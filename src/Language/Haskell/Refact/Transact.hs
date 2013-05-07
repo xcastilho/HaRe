@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables, RankNTypes, DoAndIfThenElse #-}
 -----------------------------------------------------------------------------
 --
 -- Module      :  Language.Haskell.Refact.Transact
@@ -67,8 +67,10 @@ comp maybeMainFile fileName (row, col) = do
        loadModuleGraphGhc maybeMainFile
        --modInfo@(t, _tokList) <- getModuleGhc fileName
        getModuleGhc fileName
-       checkedModule <- getTypecheckedModule
-       let typeChecked = GHC.tm_typechecked_source checkedModule
+--     /== type checking ==\
+--       checkedModule <- getTypecheckedModule
+--       let typeChecked = GHC.tm_typechecked_source checkedModule
+--     \== type checking ==/
        renamed <- getRefactRenamed
        parsed  <- getRefactParsed
 
@@ -78,10 +80,8 @@ comp maybeMainFile fileName (row, col) = do
        -- error (SYB.showData SYB.Parser 0 name)
 
        case name of
-            (Just pn) -> do 
---                refactoredMod@(_, (t, s)) <- applyRefac (doTransact pnt pn) (Just modInfo) fileName
-                (refactoredMod@(_, (t, s)), _) <- applyRefac (doTransact pnt pn) (RSFile fileName)
-                return [refactoredMod]
+            (Just pn) -> do (refactoredMod@(_, (t, s)), _) <- applyRefac (doTransact pnt pn) (RSFile fileName)
+                            return [refactoredMod]
             Nothing   -> error "Incorrect identifier selected!"
        --if isFunPNT pnt mod    -- Add this back in ++ CMB +++
        -- then do
@@ -104,10 +104,12 @@ doTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n) = do
     parsed   <- getRefactParsed
     typechecked <- liftM GHC.tm_typechecked_source getTypecheckedModule -- >>= (return.GHC.tm_typechecked_source)
     reallyDoTransact pnt name renamed typechecked
+--    reallyDoTransact pnt name renamed
 
 
 reallyDoTransact :: PNT -> GHC.Located GHC.Name -> GHC.RenamedSource -> GHC.TypecheckedSource-> RefactGhc ()
 reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed typechecked = do
+--reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed = do
 
     -- TODO: Add import declaration for STM module, if it doesn't exists.
     --newImports <- addImportDecl stmModuleName (renamedImports renamed)
@@ -122,9 +124,11 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed typechecked = d
 
     let mainbind     = ghead "bindings" binding
 
+
+--- === typechecking ===
     let typecheckedVars = listifyStaged SYB.TypeChecker (isOkVar n1) typechecked 
     liftIO $ putStrLn ("checkedVarsfound:: "++ show (map (SYB.showData SYB.TypeChecker 0 . varType) typecheckedVars)) --SYB.showData SYB.TypeChecker 0 typecheckedVars )
-
+--- === /typechecking ===
 
     -- 3) get its applications
     let applications = listifyStaged SYB.Renamer (isDesiredApplication n1) renamed
@@ -194,8 +198,12 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed typechecked = d
               | GHC.nameUnique n1 == GHC.nameUnique n2
                 = do
 --                    liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Renamer 0 bindSt ++ "<")
-                    let typeOfPattern = typeOf (GHC.VarPat n2)
-                    liftIO $ putStrLn $ SYB.showData SYB.Parser 0 typeOfPattern
+
+-- ====  testing. it breaks the build!
+--                    let typeOfPattern = typeOf (GHC.VarPat n2)
+--                    liftIO $ putStrLn $ SYB.showData SYB.Parser 0 typeOfPattern
+-- ==== /testing
+
                     newName <- translateFunction nv
                     newf <- newFuncName oldf newName
                     updateToks oldf newf GHC.showPpr False
@@ -412,57 +420,5 @@ translateHsApp _ x = return x
 realSrcSpan :: GHC.SrcSpan -> GHC.RealSrcSpan
 realSrcSpan (GHC.RealSrcSpan rssp) = rssp
 realSrcSpan _ = error "SrcSpan is not real"
-
--- ===========================
--- SYB temp - moved to GhcUtils
--- ===========================
-
-{- 
--- | Checks whether the current item is undesirable for analysis in the current
--- AST Stage.
-checkItemStage :: Typeable a => SYB.Stage -> a -> Bool
-checkItemStage stage = const False `SYB.extQ` postTcType `SYB.extQ` fixity `SYB.extQ` nameSet 
-  where nameSet    = const (stage `elem` [SYB.Parser,SYB.TypeChecker]) :: NameSet    -> Bool
-        postTcType = const (stage<SYB.TypeChecker)                     :: GHC.PostTcType -> Bool
-        fixity     = const (stage<SYB.Renamer)                         :: GHC.Fixity -> Bool
-
--- | Staged variation of SYB.everything
--- The stage must be provided to avoid trying to modify elements which
--- may not be present at all stages of AST processing.
-everythingStaged :: SYB.Stage -> (r -> r -> r) -> r -> SYB.GenericQ r -> SYB.GenericQ r
-everythingStaged stage k z f x
-  | checkItemStage stage x = z
-  | otherwise = foldl k (f x) (gmapQ (everythingStaged stage k z f) x)
-
-
--- listify :: Typeable r => (r -> Bool) -> GenericQ [r]
--- listify p = everything (++) ([] `mkQ` (\x -> if p x then [x] else []))
-
--- | Staged variation of SYB.listify
--- The stage must be provided to avoid trying to modify elements which
--- may not be present at all stages of AST processing.
-listifyStaged stage p = everythingStaged stage (++) [] ([] `SYB.mkQ` (\x -> [ x | p x ]))
--}
-
-{-        inMatch i@(GHC.L x m@(GHC.Match (p1:p2:ps) nothing rhs)::GHC.Located (GHC.Match GHC.RdrName) )
-		  -- = error (SYB.showData SYB.Parser 0 pnt)
-            | GHC.srcSpanStart s == GHC.srcSpanStart x
-              = do liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Parser 0 (p1:p2:ps) ++ "<")
-                   p1' <- update p1 p2 p1 --pats
-                   p2' <- update p2 p1 p2
-                   return (GHC.L x (GHC.Match (p1':p2':ps) nothing rhs))
-        inMatch i = return i
-
-        inExp exp@((GHC.L x (GHC.HsApp (GHC.L y (GHC.HsApp e e1)) e2))::GHC.Located (GHC.HsExpr GHC.RdrName))
-          {- | (fromJust $ expToName e) == (GHC.L s (GHC.nameRdrName n))-} -- = error (SYB.showData SYB.Parser 0 (GHC.L s (GHC.nameRdrName n)))  -- update e2 e1 =<< update e1 e2 exp
-       -- inExp e = return e -}
-        -- In the call-site.
-   {- inExp exp@((Exp (HsApp (Exp (HsApp e e1)) e2))::HsExpP)
-      | expToPNT e == pnt
-      = update e2 e1 =<< update e1 e2 exp
-    inExp e = return e -}
--- pats nothing rhss ds)
-
--- expToPNT x = undefined
 
 

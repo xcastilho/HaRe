@@ -57,13 +57,23 @@ data Entry = Entry ForestSpan -- ^The source span contained in this Node
 -- ---------------------------------------------------------------------
 
 data ForestLine = ForestLine
-                  { flTreeSelector :: Int
+                  { flSpanLengthChanged :: Bool -- ^The length of the
+                                                -- span may have
+                                                -- changed due to
+                                                -- updated tokens.
+                  , flTreeSelector :: Int
                   , flInsertVersion :: Int
                   , flLine :: Int
-                  } deriving (Eq)
+                  } -- deriving (Eq)
+
+instance Eq ForestLine where
+  -- TODO: make this undefined, and patch all broken code to use the
+  --       specific fun here directly instead.
+  (ForestLine _ s1 v1 l1) == (ForestLine _ s2 v2 l2) = s1 == s2 && v1 == v2 && l1 == l2
 
 instance Show ForestLine where
-  show s = "(ForestLine " ++ (show $ flTreeSelector s)
+  show s = "(ForestLine " ++ (show $ flSpanLengthChanged s)
+         ++ " " ++ (show $ flTreeSelector s)
          ++ " " ++ (show $ flInsertVersion s)
          ++ " " ++ (show $ flLine s)
          ++ ")"

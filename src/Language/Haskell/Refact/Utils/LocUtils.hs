@@ -43,7 +43,7 @@ module Language.Haskell.Refact.Utils.LocUtils(
                      {-,
                      prettyprint ,deleteFromToks, prettyprintGuardsAlt,
                      -}
-                     , addFormalParams {- ,  adjustOffset, -- try to remove it
+                     {-, addFormalParams -} {- ,  adjustOffset, -- try to remove it
                      StartEndLoc, isArrow,-- swapInToks,
                      commentToks
                      -}
@@ -368,7 +368,7 @@ prettyprintPatList :: (t -> String) -> Bool -> [t] -> String
 prettyprintPatList prpr beginWithSpace t
      = replaceTabBySpaces $ if beginWithSpace then format1 t else format2 t
  where
-   format1 t = foldl (\x y -> x++ " "++ prpr y) "" t
+   format1 tt = foldl (\x y -> x++ " "++ prpr y) "" tt
 
    format2 [] = ""
    format2 [p] = (prpr p) --  (render.ppi) p
@@ -548,12 +548,8 @@ updateToks :: (SYB.Data t)
   -> (GHC.Located t -> [Char]) -- ^ pretty printer
   -> Bool         -- ^ Add trailing newline if required
   -> RefactGhc () -- ^ Updates the RefactState
-updateToks oldAST@(GHC.L sspan _) newAST printFun addTrailingNl
-  -- = trace "updateToks" $
+updateToks (GHC.L sspan _) newAST printFun addTrailingNl
   = do
-       -- let (startPos, endPos) = getStartEndLoc oldAST
-       -- updateToksWithPos (startPos,endPos) newAST printFun addTrailingNl
-
        newToks <- liftIO $ basicTokenise (printFun newAST)
        let newToks' = if addTrailingNl 
                        then newToks ++ [newLnToken (last newToks)]
@@ -581,7 +577,7 @@ updateToksWithPos (startPos,endPos) newAST printFun addTrailingNl
        return ()
 
 -- ---------------------------------------------------------------------
-
+{-
 -- | Add tokens corresponding to the new parameters to the end of the
 -- syntax element provided
 addFormalParams :: (SYB.Data t, SYB.Typeable t) =>
@@ -595,7 +591,7 @@ addFormalParams t newParams
        _ <- putToksAfterPos (startPos,endPos) PlaceAdjacent $ map markToken newToks
 
        return ()
-
+-}
 -- ---------------------------------------------------------------------
 
 -- |Replace a list of tokens in the token stream by a new list of
