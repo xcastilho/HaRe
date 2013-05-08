@@ -23,6 +23,7 @@ main :: IO ()
 main = do
   x <- newEmptyMVar
   putStrLn $ show $ (foo (5 + 42))
+  uselessFunc "oi"
 
 mary :: [Integer]
 mary = [1,2,3]
@@ -35,4 +36,7 @@ subdecl x = zz x
   where
     zz n = n + 1
 
+uselessFunc text = do 
+  x <- newMVar 2
+  print text
 

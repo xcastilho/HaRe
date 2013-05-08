@@ -83,6 +83,7 @@ comp maybeMainFile fileName (row, col) = do
             (Just pn) -> do (refactoredMod@(_, (t, s)), _) <- applyRefac (doTransact pnt pn) (RSFile fileName)
                             return [refactoredMod]
             Nothing   -> error "Incorrect identifier selected!"
+
        --if isFunPNT pnt mod    -- Add this back in ++ CMB +++
        -- then do
               --        rs <-if isExported pnt exps
@@ -127,7 +128,8 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed typechecked = d
 
 --- === typechecking ===
     let typecheckedVars = listifyStaged SYB.TypeChecker (isOkVar n1) typechecked 
-    liftIO $ putStrLn ("checkedVarsfound:: "++ show (map (SYB.showData SYB.TypeChecker 0 . varType) typecheckedVars)) --SYB.showData SYB.TypeChecker 0 typecheckedVars )
+    let lVars = length typecheckedVars
+    liftIO $ putStrLn ("checkedVarsfound ("++(show lVars)++"):: "++ show (map (SYB.showData SYB.TypeChecker 0 . varType) typecheckedVars)) --SYB.showData SYB.TypeChecker 0 typecheckedVars )
 --- === /typechecking ===
 
     -- 3) get its applications
@@ -146,7 +148,6 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed typechecked = d
 --    liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Parser 0 renamed'{-(GHC.L x (GHC.VarPat n2))-} ++ "<")
     putRefactRenamed renamed'
 
-    return ()
     liftIO $ putStrLn $ "Found name? "++show (isJust (getName "Control.Concurrent.STM.TMVar.newEmptyTMVarIO" renamed))
     liftIO $ putStrLn $"Number of applications "++ show (length applications) ++ " " ++ GHC.showPpr applications
     liftIO $ putStrLn $"Number of uncommon functions "++ show (length uncommonApps) ++ " " ++ SYB.showData SYB.Renamer 0 uncommonApps
@@ -214,7 +215,7 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed typechecked = d
               | GHC.nameUnique n1 == GHC.nameUnique n2
                 = do
 --                    liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Renamer 0 bindSt ++ "<")
-                    let typeOfPattern = typeOf (GHC.VarPat n2)
+--                    let typeOfPattern = typeOf (GHC.VarPat n2)
                     newName <- translateFunction nv
                     let newf = GHC.L l $ GHC.HsApp (GHC.L y (GHC.HsVar newName)) exp2
                     updateToks oldf newf GHC.showPpr False
