@@ -31,6 +31,8 @@ import qualified RdrName               as GHC
 import qualified OccName               as GHC
 import qualified SrcLoc                as GHC
 import qualified Module                as GHC
+import qualified TypeRep               as GHC
+import TyCon
 import Var
 import NameSet
 
@@ -129,35 +131,43 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed typechecked = d
 --- === typechecking ===
     let typecheckedVars = listifyStaged SYB.TypeChecker (isOkVar n1) typechecked 
     let lVars = length typecheckedVars
-    liftIO $ putStrLn ("checkedVarsfound ("++(show lVars)++"):: "++ show (map (SYB.showData SYB.TypeChecker 0 . varType) typecheckedVars)) --SYB.showData SYB.TypeChecker 0 typecheckedVars )
+    let typecheckedTypes = map varType typecheckedVars
+    let rightTypes = filter isOkType typecheckedTypes
+    let typenames = map getTypeName rightTypes
+    liftIO $ putStrLn ("checkedVarsfound ("++(show lVars)++"):: "++ show (map (SYB.showData SYB.TypeChecker 0) typecheckedTypes)) --SYB.showData SYB.TypeChecker 0 typecheckedVars )
+    liftIO $ putStrLn ("varsTypes: "++show typenames)
+    let successful = (length typenames) == 1 && (head typenames) == "GHC.MVar.MVar"
+    if not successful then
+        error "Error: did not select an MVar variable."
+    else do
 --- === /typechecking ===
 
-    -- 3) get its applications
-    let applications = listifyStaged SYB.Renamer (isDesiredApplication n1) renamed
+        -- 3) get its applications
+        let applications = listifyStaged SYB.Renamer (isDesiredApplication n1) renamed
 
-    -- 4.1) separate applications different from the concurrency functions
-    let uncommonApps = filter (not . appMatchesDefaultConc) applications
+        -- 4.1) separate applications different from the concurrency functions
+        let uncommonApps = filter (not . appMatchesDefaultConc) applications
 
-    let commonApps   = filter appMatchesDefaultConc applications
+        let commonApps   = filter appMatchesDefaultConc applications
 
-    let commonApps2  = filterLExpr commonApps []    
+        let commonApps2  = filterLExpr commonApps []    
 
-    let appStarts    = map startEndLineCol commonApps2
+        let appStarts    = map startEndLineCol commonApps2
 
-    renamed' <- everywhereMStaged SYB.Renamer (SYB.mkM inMod `SYB.extM` inExp appStarts {-`SYB.extM` inType -}) renamed -- this needs to be bottom up +++ CMB +++
---    liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Parser 0 renamed'{-(GHC.L x (GHC.VarPat n2))-} ++ "<")
-    putRefactRenamed renamed'
+        renamed' <- everywhereMStaged SYB.Renamer (SYB.mkM inMod `SYB.extM` inExp appStarts {-`SYB.extM` inType -}) renamed -- this needs to be bottom up +++ CMB +++
+--        liftIO $ putStrLn ("inMatch>" ++ SYB.showData SYB.Parser 0 renamed'{-(GHC.L x (GHC.VarPat n2))-} ++ "<")
+        putRefactRenamed renamed'
 
-    liftIO $ putStrLn $ "Found name? "++show (isJust (getName "Control.Concurrent.STM.TMVar.newEmptyTMVarIO" renamed))
-    liftIO $ putStrLn $"Number of applications "++ show (length applications) ++ " " ++ GHC.showPpr applications
-    liftIO $ putStrLn $"Number of uncommon functions "++ show (length uncommonApps) ++ " " ++ SYB.showData SYB.Renamer 0 uncommonApps
-    liftIO $ putStrLn $"Number of common functions "++ show (length commonApps2) ++ " " ++ GHC.showPpr commonApps2
-    liftIO $ putStrLn $"Number of bindings "++ show (length binding) ++ " " ++ SYB.showData SYB.Renamer 0 binding
+        liftIO $ putStrLn $ "Found name? "++show (isJust (getName "Control.Concurrent.STM.TMVar.newEmptyTMVarIO" renamed))
+        liftIO $ putStrLn $"Number of applications "++ show (length applications) ++ " " ++ GHC.showPpr applications
+        liftIO $ putStrLn $"Number of uncommon functions "++ show (length uncommonApps) ++ " " ++ SYB.showData SYB.Renamer 0 uncommonApps
+        liftIO $ putStrLn $"Number of common functions "++ show (length commonApps2) ++ " " ++ GHC.showPpr commonApps2
+        liftIO $ putStrLn $"Number of bindings "++ show (length binding) ++ " " ++ SYB.showData SYB.Renamer 0 binding
 --(GHC.showPpr binding)
 
---    liftIO $ putStrLn $"test> "++ (SYB.showData SYB.Renamer 0 renamed)
+--        liftIO $ putStrLn $"test> "++ (SYB.showData SYB.Renamer 0 renamed)
 
-    where
+      where
 
          startLineCol :: GHC.Located a -> (Int,Int)
          startLineCol  = fst . startEndLineCol
@@ -310,6 +320,14 @@ isTyVarTy = undefined --(TypeRep.TyVarTy _) = True
 
 isOkVar :: GHC.Name -> Var -> Bool
 isOkVar name variable = GHC.nameUnique name == GHC.nameUnique ( varName variable ) 
+
+isOkType :: GHC.Type -> Bool
+isOkType (GHC.TyConApp _ _) = True
+isOkType _ = False
+
+getTypeName :: GHC.Type -> String
+getTypeName (GHC.TyConApp tycon _) = (nameToString . TyCon.tyConName) tycon
+getTypeName _ = []
 
 -- filter for 2) get its binding(s)
 isDesiredBinding :: GHC.Name -> GHC.StmtLR GHC.Name GHC.Name -> Bool
