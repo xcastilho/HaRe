@@ -1,43 +1,36 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Language.Haskell.Refact.SwapArgs (swapArgs) where
 
-import qualified Data.Generics.Schemes as SYB
+-- import qualified Data.Generics.Schemes as SYB
 import qualified Data.Generics.Aliases as SYB
 import qualified GHC.SYB.Utils         as SYB
 
 import qualified FastString            as GHC
 import qualified Name                  as GHC
 import qualified GHC
-import qualified DynFlags              as GHC
-import qualified Outputable            as GHC
-import qualified MonadUtils            as GHC
-import qualified RdrName               as GHC
-import qualified OccName               as GHC
+-- import qualified DynFlags              as GHC
+-- import qualified Outputable            as GHC
+-- import qualified MonadUtils            as GHC
+-- import qualified RdrName               as GHC
+-- import qualified OccName               as GHC
 
-import GHC.Paths ( libdir )
-import Control.Monad
-import Control.Monad.State
-import Data.Data
-import Data.Maybe
------------------
-
+import Language.Haskell.GhcMod
 import Language.Haskell.Refact.Utils
 import Language.Haskell.Refact.Utils.GhcUtils
 import Language.Haskell.Refact.Utils.LocUtils
 import Language.Haskell.Refact.Utils.Monad
 import Language.Haskell.Refact.Utils.MonadFunctions
-import Language.Haskell.Refact.Utils.TokenUtils
-import Language.Haskell.Refact.Utils.TypeSyn
 import Language.Haskell.Refact.Utils.TypeUtils
 
 import Debug.Trace
 
-swapArgs :: [String] -> IO () -- For now
-swapArgs args
+-- TODO: replace args with specific parameters
+swapArgs :: RefactSettings -> Cradle -> [String] -> IO [FilePath]
+swapArgs settings cradle args
   = do let fileName = args!!0
            row = (read (args!!1)::Int)
            col = (read (args!!2)::Int)
-       runRefacSession Nothing Nothing (comp fileName (row,col))
+       runRefacSession settings cradle (comp fileName (row,col))
 
 
 comp :: String -> SimpPos
@@ -52,13 +45,16 @@ comp fileName (row, col) = do
        -- putStrLn $ showParsedModule mod
        -- let pnt = locToPNT fileName (row, col) mod
 
-       let pnt = locToPNT (GHC.mkFastString fileName) (row, col) renamed
        let name = locToName (GHC.mkFastString fileName) (row, col) renamed
        -- error (SYB.showData SYB.Parser 0 name)
 
        case name of
             -- (Just pn) -> do refactoredMod@(_, (_t, s)) <- applyRefac (doSwap pnt pn) (Just modInfo) fileName
-            (Just pn) -> do (refactoredMod@(_, (_t, s)),_) <- applyRefac (doSwap pnt pn) (RSFile fileName)
+            (Just pn) -> do
+                            -- let pnt = locToPNT (GHC.mkFastString fileName) (row, col) renamed
+                            -- let pnt = gfromJust "SwapArgs.comp" $ locToRdrName (GHC.mkFastString fileName) (row, col) renamed
+
+                            (refactoredMod@(_, (_t, _s)),_) <- applyRefac (doSwap pn) (RSFile fileName)
                             return [refactoredMod]
             Nothing   -> error "Incorrect identifier selected!"
        --if isFunPNT pnt mod    -- Add this back in ++ CMB +++
@@ -76,15 +72,15 @@ comp fileName (row, col) = do
 
 
 doSwap ::
- PNT -> (GHC.Located GHC.Name) -> RefactGhc () -- m GHC.ParsedSource
-doSwap pnt@(PNT (GHC.L _ _)) name@(GHC.L _s _n) = do
+ (GHC.Located GHC.Name) -> RefactGhc () -- m GHC.ParsedSource
+doSwap name = do
     -- inscopes <- getRefactInscopes
     renamed  <- getRefactRenamed
     -- parsed   <- getRefactParsed
-    reallyDoSwap pnt name renamed
+    reallyDoSwap name renamed
 
-reallyDoSwap :: PNT -> (GHC.Located GHC.Name) -> GHC.RenamedSource -> RefactGhc ()
-reallyDoSwap _pnt@(PNT (GHC.L _ _)) _name@(GHC.L s n1) renamed = do
+reallyDoSwap :: (GHC.Located GHC.Name) -> GHC.RenamedSource -> RefactGhc ()
+reallyDoSwap (GHC.L _s n1) renamed = do
     renamed' <- everywhereMStaged SYB.Renamer (SYB.mkM inMod `SYB.extM` inExp `SYB.extM` inType) renamed -- this needs to be bottom up +++ CMB +++
     putRefactRenamed renamed'
     return ()
@@ -155,6 +151,6 @@ reallyDoSwap _pnt@(PNT (GHC.L _ _)) _name@(GHC.L s n1) renamed = do
 
 -- expToPNT x = undefined
 
-prettyprint :: (GHC.Outputable a) => a -> String
-prettyprint x = GHC.showSDoc $ GHC.ppr x
+-- prettyprint :: (GHC.Outputable a) => a -> String
+-- prettyprint x = GHC.showSDoc $ GHC.ppr x
 

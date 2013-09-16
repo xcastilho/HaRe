@@ -1,94 +1,64 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Language.Haskell.Refact.Utils.Monad
        ( ParseResult
-       -- , RefactResult
+       , VerboseLevel(..)
        , RefactSettings(..)
        , RefactState(..)
        , RefactModule(..)
        , RefactStashId(..)
        , RefactFlags(..)
        , StateStorage(..)
-       -- , initRefactModule
+
        -- GHC monad stuff
        , RefactGhc
        , runRefactGhc
        , getRefacSettings
        , defaultSettings
        , logSettings
+       , initGhcSession
 
-       {- ++AZ++ moved to MonadUtils, to break import cycle
-       -- * Conveniences for state access
-       , fetchToks
-       , fetchOrigToks
-       , putToks
-       , getTypecheckedModule
-       , getRefactStreamModified
-       , getRefactInscopes
-       , getRefactRenamed
-       , putRefactRenamed
-       , getRefactParsed
-       , putParsedModule
-       , clearParsedModule
-
-       -- * State flags for managing generic traversals
-       , getRefactDone
-       , setRefactDone
-       , clearRefactDone
-       -}
-
-       -- , Refact -- ^ TODO: Deprecated, use RefactGhc
-       -- , runRefact -- ^ TODO: Deprecated, use runRefactGhc
        ) where
 
 import Control.Monad.State
-import Data.Maybe
 import Exception
 import qualified Control.Monad.IO.Class as MU
 
-import qualified Bag           as GHC
-import qualified BasicTypes    as GHC
-import qualified DynFlags      as GHC
-import qualified FastString    as GHC
 import qualified GHC           as GHC
-import qualified GhcMonad      as GHC
 import qualified GHC.Paths     as GHC
-import qualified HsSyn         as GHC
-import qualified Module        as GHC
+import qualified GhcMonad      as GHC
 import qualified MonadUtils    as GHC
-import qualified Outputable    as GHC
-import qualified RdrName       as GHC
-import qualified SrcLoc        as GHC
-import qualified TcEvidence    as GHC
-import qualified TcType        as GHC
-import qualified TypeRep       as GHC
-import qualified Var           as GHC
-import qualified Lexer         as GHC
-import qualified Coercion      as GHC
-import qualified ForeignCall   as GHC
-import qualified InstEnv       as GHC
 
+import Data.List
+import Language.Haskell.GhcMod
+import Language.Haskell.GhcMod.Internal
 import Language.Haskell.Refact.Utils.TokenUtilsTypes
 import Language.Haskell.Refact.Utils.TypeSyn
 
-import Data.Tree
-import qualified Data.Map as Map
-
 -- ---------------------------------------------------------------------
 
+data VerboseLevel = Debug | Normal | Off
+            deriving (Eq,Show)
+
 data RefactSettings = RefSet
-        { rsetImportPath :: ![FilePath]
-        -- , rsetLogFileName :: Maybe FilePath
-        , rsetLoggingOn :: !Bool
+        { rsetGhcOpts      :: ![String]
+        , rsetImportPaths :: ![FilePath]
+        , rsetExpandSplice :: Bool
+        , rsetMainFile     :: Maybe FilePath
+        -- | The sandbox directory.
+        , rsetSandbox      :: Maybe FilePath
+        , rsetCheckTokenUtilsInvariant :: !Bool
+        , rsetVerboseLevel :: !VerboseLevel
         } deriving (Show)
 
 defaultSettings :: RefactSettings
-defaultSettings = RefSet ["."] False
+defaultSettings = RefSet [] [] False Nothing Nothing False Normal
 
 logSettings :: RefactSettings
-logSettings = defaultSettings { rsetLoggingOn = True }
+logSettings = defaultSettings { rsetVerboseLevel = Debug }
 
 
 data RefactStashId = Stash !String deriving (Show,Eq,Ord)
@@ -115,10 +85,8 @@ data RefactState = RefSt
         , rsModule    :: !(Maybe RefactModule) -- ^The current module being refactored
         }
 
--- |Result of parsing a Haskell source file. The first element in the
--- result is the inscope relation, the second element is the export
--- relation and the third is the AST of the module. This is likely to
--- change as we learn more
+-- |Result of parsing a Haskell source file. It is simply the
+-- TypeCheckedModule produced by GHC.
 type ParseResult = GHC.TypecheckedModule
 
 -- |Provide some temporary storage while the refactoring is taking
@@ -129,15 +97,15 @@ data StateStorage = StorageNone
 
 instance Show StateStorage where
   show StorageNone        = "StorageNone"
-  show (StorageBind bind) = "(StorageBind " ++ (GHC.showPpr bind) ++ ")"
-  show (StorageSig sig)   = "(StorageSig " ++ (GHC.showPpr sig) ++ ")"
+  show (StorageBind _bind) = "(StorageBind " {- ++ (showGhc bind) -} ++ ")"
+  show (StorageSig _sig)   = "(StorageSig " {- ++ (showGhc sig) -} ++ ")"
 
 -- ---------------------------------------------------------------------
 -- StateT and GhcT stack
 
 type RefactGhc a = GHC.GhcT (StateT RefactState IO) a
 
-instance (MonadIO (GHC.GhcT (StateT RefactState IO))) where
+instance (MU.MonadIO (GHC.GhcT (StateT RefactState IO))) where
          liftIO = GHC.liftIO
 
 instance GHC.MonadIO (StateT RefactState IO) where
@@ -158,14 +126,66 @@ instance (MonadTrans GHC.GhcT) where
    lift = GHC.liftGhcT
 
 instance (MonadPlus m,Functor m,GHC.MonadIO m,ExceptionMonad m) => MonadPlus (GHC.GhcT m) where
-  mzero = GHC.GhcT $ \s -> mzero
-  x `mplus` y = GHC.GhcT $ \s -> (GHC.runGhcT (Just GHC.libdir) x) `mplus` (GHC.runGhcT (Just GHC.libdir) y)
+  mzero = GHC.GhcT $ \_s -> mzero
+  x `mplus` y = GHC.GhcT $ \_s -> (GHC.runGhcT (Just GHC.libdir) x) `mplus` (GHC.runGhcT (Just GHC.libdir) y)
+
+
+-- ---------------------------------------------------------------------
+
+-- | Initialise the GHC session, when starting a refactoring.
+--   This should never be called directly.
+{-
+initGhcSession :: RefactGhc ()
+initGhcSession = do
+      settings <- getRefacSettings
+      dflags   <- GHC.getSessionDynFlags
+      let dflags' = foldl GHC.xopt_set dflags
+                    [GHC.Opt_Cpp, GHC.Opt_ImplicitPrelude, GHC.Opt_MagicHash
+                    ]
+          dflags'' = dflags' { GHC.importPaths = rsetImportPath settings }
+
+          -- Enable GHCi style in-memory linking
+          dflags''' = dflags'' { GHC.hscTarget = GHC.HscInterpreted,
+                                 GHC.ghcLink   = GHC.LinkInMemory }
+
+      _ <- GHC.setSessionDynFlags dflags'''
+      return ()
+-}
+
+initGhcSession :: Cradle -> [FilePath] -> RefactGhc ()
+initGhcSession cradle importDirs = do
+    settings <- getRefacSettings
+    let ghcOptsDirs =
+         case importDirs of
+           [] -> (rsetGhcOpts settings)
+           _  -> ("-i" ++ (intercalate ":" importDirs)):(rsetGhcOpts settings)
+    let opt = Options {
+                 outputStyle = PlainStyle
+                 , hlintOpts = []
+                 , ghcOpts = ghcOptsDirs
+                 , operators = False
+                 , detailed = False
+                 , expandSplice = False
+                 , sandbox = (rsetSandbox settings)
+                 , lineSeparator = LineSeparator "\n"
+                 }
+    _readLog <- initializeFlagsWithCradle opt cradle (options settings) True
+    -- setTargetFile fileNames
+    -- checkSlowAndSet
+    void $ GHC.load GHC.LoadAllTargets
+    -- liftIO readLog
+    return ()
+    where
+      options opt
+        | rsetExpandSplice opt = "-w:"   : rsetGhcOpts opt
+        | otherwise            = "-Wall" : rsetGhcOpts opt
 
 
 runRefactGhc ::
   RefactGhc a -> RefactState -> IO (a, RefactState)
 runRefactGhc comp initState = do
     runStateT (GHC.runGhcT (Just GHC.libdir) comp) initState
+    -- runStateT (GHC.runGhcT (Just GHC.libdir) (initGhcSession >> comp)) initState
 
 getRefacSettings :: RefactGhc RefactSettings
 getRefacSettings = do

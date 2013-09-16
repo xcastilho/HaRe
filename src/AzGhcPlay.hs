@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -14,7 +15,6 @@ import qualified OccName(occNameString)
 
 
 -----------------
-import Language.Haskell.Refact.Utils.GhcUtils as SYB
 
 import qualified Data.Generics.Schemes as SYB
 import qualified Data.Generics.Aliases as SYB
@@ -24,37 +24,41 @@ import Var
 import qualified CoreFVs               as GHC
 import qualified CoreSyn               as GHC
 import qualified DynFlags              as GHC
+import qualified ErrUtils              as GHC
+import qualified Exception             as GHC
 import qualified FastString            as GHC
 import qualified GHC                   as GHC
 import qualified HscTypes              as GHC
+import qualified Lexer                 as GHC
 import qualified MonadUtils            as GHC
 import qualified Outputable            as GHC
 import qualified SrcLoc                as GHC
 import qualified StringBuffer          as GHC
 
 import GHC.Paths ( libdir )
- 
+
 -----------------
 
 import Language.Haskell.Refact.Utils
+import Language.Haskell.Refact.Utils.GhcUtils
 import Language.Haskell.Refact.Utils.LocUtils
 import Language.Haskell.Refact.Utils.Monad
 import Language.Haskell.Refact.Utils.TokenUtils
 import Language.Haskell.Refact.Utils.TypeUtils
 import qualified Language.Haskell.Refact.Case as GhcRefacCase
 import qualified Language.Haskell.Refact.SwapArgs as GhcSwapArgs
-import qualified Language.Haskell.Refact.Rename as GhcRefacRename
 
 import Control.Monad.State
 
-import Control.Lens
 import Control.Applicative
-import Control.Lens
-import Control.Lens.Plated
 import Data.Data
-import Data.Data.Lens(uniplate,biplate,template,tinplate)
+import Data.IORef
+import System.Directory
+import System.FilePath
+import qualified Data.Map as Map
 
-import Language.Haskell.Refact.Utils.GhcUtils
+-- import Language.Haskell.Refact.Utils.GhcUtils
+
 
 -- targetFile = "./refactorer/" ++ targetMod ++ ".hs"
 
@@ -73,60 +77,16 @@ targetFile = "./test/testdata/" ++ targetMod ++ ".hs" -- ++AZ++
 -- targetMod = "Demote/WhereIn6"                                       -- ++AZ++
 -- targetMod = "MoveDef/Md1"                                       -- ++AZ++
 -- targetMod = "Demote/WhereIn2"                                       -- ++AZ++
-targetMod = "Demote/PatBindIn1"                                       -- ++AZ++
+-- targetMod = "Demote/PatBindIn1"                                       -- ++AZ++
+targetMod = "BCpp"                                       -- ++AZ++
 
-{- main = t1 -}
+main = putStrLn "main"
 
-t1 = GhcRefacCase.ifToCase ["../old/refactorer/B.hs","4","7","4","43"]
-t2 = GhcRefacCase.ifToCase ["./old/B.hs","4","7","4","43"]
-
-s1 = GhcSwapArgs.swapArgs ["../test/testdata/SwapArgs/B.hs","10","1"]
-
-{-
-s1 = GhcSwapArgs.swapArgs ["../old/refactorer/B.hs","6","1"]
-s2 = GhcSwapArgs.swapArgs ["./old/refactorer/B.hs","6","1"]
--}
-
--- added by Chris for renaming
-r1 = GhcRefacRename.rename ["./Ole.hs", "Cas", "18", "1"]  -- lambda
-r2 = GhcRefacRename.rename ["./Ole.hs", "j", "21", "1"] -- case of
-r3 = GhcRefacRename.rename ["./Ole.hs", "x", "26", "19"] -- if else / par
-r4 = GhcRefacRename.rename ["./Ole.hs", "kkk", "30", "1"] -- pattern binding
-r5 = GhcRefacRename.rename ["./Ole.hs", "bob", "14", "15"] -- let
-r6 = GhcRefacRename.rename ["./Ole.hs", "a", "33", "1"] -- where clause
-r7 = GhcRefacRename.rename ["./Ole.hs", "newBlah", "38", "6"] -- data declaration
-
-p1 = 
+p1 =
   do
     toks <- lexStringToRichTokens (GHC.mkRealSrcLoc (GHC.mkFastString "foo") 0 0) "if (1) then x else y"
     putStrLn $ showToks toks
 
-
-
--- import RefacUtils 
-{-
-ifToCase args  
-  = do let fileName = args!!0              
-           beginPos = (read (args!!1), read (args!!2))::(Int,Int)
-           endPos   = (read (args!!3), read (args!!4))::(Int,Int)
-       modInfo@(_, _, mod, toks) <- parseSourceFile fileName 
-       let exp = locToExp beginPos endPos toks mod
-       case exp of 
-           (Exp (HsIf _ _ _))   
-                -> do refactoredMod <- applyRefac (ifToCase exp) (Just modInfo) fileName          
-                      writeRefactoredFiles False [refactoredMod]
-           _   -> error "You haven't selected an if-then-else  expression!"
-    where 
-
-     ifToCase exp (_, _, mod)= applyTP (once_buTP (failTP `adhocTP` inExp)) mod
-       where 
-         inExp exp1@((Exp (HsIf  e e1 e2))::HsExpP)
-           | sameOccurrence exp exp1       
-           = let newExp =Exp (HsCase e [HsAlt loc0 (nameToPat "True") (HsBody e1) [],
-                                        HsAlt loc0 (nameToPat "False")(HsBody e2) []])
-             in update exp1 newExp exp1
-         inExp _ = mzero
--}
 
 -- data HsExpr id
 --   ...
@@ -137,28 +97,35 @@ ifToCase args
 --            ^1
 
 -- data MatchGroup id
---   MatchGroup [LMatch id] PostTcType	
+--   MatchGroup [LMatch id] PostTcType
 -- type LMatch id = Located (Match id)
--- data Match id 
---   Match [LPat id] (Maybe (LHsType id)) (GRHSs id)	 
+-- data Match id
+--   Match [LPat id] (Maybe (LHsType id)) (GRHSs id)
 
 getStuff =
+#if __GLASGOW_HASKELL__ > 704
+    GHC.defaultErrorHandler GHC.defaultFatalMessager GHC.defaultFlushOut $ do
+#else
     GHC.defaultErrorHandler GHC.defaultLogAction $ do
+#endif
       GHC.runGhc (Just libdir) $ do
         dflags <- GHC.getSessionDynFlags
         let dflags' = foldl GHC.xopt_set dflags
-                            [GHC.Opt_Cpp, GHC.Opt_ImplicitPrelude, GHC.Opt_MagicHash]
+                           [GHC.Opt_Cpp, GHC.Opt_ImplicitPrelude, GHC.Opt_MagicHash]
 
             dflags'' = dflags' { GHC.importPaths = ["./test/testdata/","../test/testdata/"] }
 
             dflags''' = dflags'' { GHC.hscTarget = GHC.HscInterpreted,
                                    GHC.ghcLink =  GHC.LinkInMemory }
- 
+
         GHC.setSessionDynFlags dflags'''
+        GHC.liftIO $ putStrLn $ "dflags set"
 
         target <- GHC.guessTarget targetFile Nothing
         GHC.setTargets [target]
+        GHC.liftIO $ putStrLn $ "targets set"
         GHC.load GHC.LoadAllTargets -- Loads and compiles, much as calling make
+        GHC.liftIO $ putStrLn $ "targets loaded"
         -- modSum <- GHC.getModSummary $ GHC.mkModuleName "B"
         -- modSum <- GHC.getModSummary $ GHC.mkModuleName "FreeAndDeclared.Declare"
         -- modSum <- GHC.getModSummary $ GHC.mkModuleName "SwapArgs.B"
@@ -167,27 +134,38 @@ getStuff =
         -- modSum <- GHC.getModSummary $ GHC.mkModuleName "Demote.WhereIn6"
         -- modSum <- GHC.getModSummary $ GHC.mkModuleName "MoveDef.Md1"
         -- modSum <- GHC.getModSummary $ GHC.mkModuleName "Demote.WhereIn2"
-        modSum <- GHC.getModSummary $ GHC.mkModuleName "Demote.PatBindIn1"
+        -- modSum <- GHC.getModSummary $ GHC.mkModuleName "Demote.PatBindIn1"
+        modSum <- GHC.getModSummary $ GHC.mkModuleName "BCpp"
+        GHC.liftIO $ putStrLn $ "got modsummary"
         p <- GHC.parseModule modSum
+        GHC.liftIO $ putStrLn $ "parsed"
 
         t <- GHC.typecheckModule p
+        GHC.liftIO $ putStrLn $ "type checked"
         d <- GHC.desugarModule t
         l <- GHC.loadModule d
         n <- GHC.getNamesInScope
         -- c <- return $ GHC.coreModule d
         c <- return $ GHC.coreModule d
 
-        GHC.setContext [GHC.IIModule (GHC.ms_mod modSum)]
+#if __GLASGOW_HASKELL__ > 704
+        GHC.setContext [GHC.IIModule (GHC.moduleName $ GHC.ms_mod modSum)]
+#else
+        GHC.setContext [GHC.IIModule (                 GHC.ms_mod modSum)]
+#endif
+
+        -- GHC.setContext [GHC.IIModule (GHC.ms_mod modSum)]
         inscopes <- GHC.getNamesInScope
-        
+        GHC.liftIO $ putStrLn $ "got inscopes"
+
 
         g <- GHC.getModuleGraph
         gs <- mapM GHC.showModule g
-        -- GHC.liftIO (putStrLn $ "modulegraph=" ++ (show gs))
+        GHC.liftIO (putStrLn $ "modulegraph=" ++ (show gs))
         -- return $ (parsedSource d,"/n-----/n",  typecheckedSource d, "/n-=-=-=-=-=-=-/n", modInfoTyThings $ moduleInfo t)
         -- return $ (parsedSource d,"/n-----/n",  typecheckedSource d, "/n-=-=-=-=-=-=-/n")
         -- return $ (typecheckedSource d)
-        
+
         -- res <- getRichTokenStream (ms_mod modSum)
         -- return $ showRichTokenStream res
 
@@ -200,15 +178,61 @@ getStuff =
         -- let p' = processParsedMod ifToCase t
         -- GHC.liftIO (putStrLn . showParsedModule $ t)
         -- GHC.liftIO (putStrLn . showParsedModule $ p')
-        -- GHC.liftIO (putStrLn $ GHC.showPpr $ GHC.tm_typechecked_source p')
+        -- GHC.liftIO (putStrLn $ showGhc $ GHC.tm_typechecked_source p')
 
         let ps  = GHC.pm_parsed_source p
+        GHC.liftIO $ putStrLn $ "got parsed source"
         -- GHC.liftIO (putStrLn $ SYB.showData SYB.Parser 0 ps)
         -- GHC.liftIO (putStrLn $ show (modIsExported ps))
         -- _ <- processVarUniques t
 
+        -- Suspect bug getting tokens for cpp source
+        saf@(srcFile,src,flags) <- getModuleSourceAndFlags (GHC.ms_mod modSum)
+        GHC.liftIO $ putStrLn $ "got saf:" ++ show (srcFile,src)
+        GHC.liftIO $ putStrLn $ "got src:[" ++ sbufToString src ++ "]"
+        GHC.liftIO $ putStrLn $ "got saf:" ++ show (srcFile,src)
+
+        df <- GHC.getSessionDynFlags
+        d <- GHC.liftIO $ getTempDir df
+        GHC.liftIO $ putStrLn $ "temp dir=:" ++ show (d)
+        fileList <- GHC.liftIO $ getDirectoryContents d
+        GHC.liftIO $ putStrLn $ "temp dir files=:" ++ show (fileList)
+        let suffix = "hscpp"
+
+        let cppFiles = filter (\f -> getSuffix f == suffix) fileList
+        GHC.liftIO $ putStrLn $ "temp dir hscpp files=:" ++ show (cppFiles)
+        origNames <- GHC.liftIO $ mapM getOriginalFile $ map (\f -> d </> f) cppFiles
+        GHC.liftIO $ putStrLn $ "temp dir orig names=:" ++ show (origNames)
+        let tmpFile = head $ filter (\(o,_) -> o == srcFile) origNames
+        GHC.liftIO $ putStrLn $ "temp dir tmpFile=:" ++ show (tmpFile)
+        buf <- GHC.liftIO $ GHC.hGetStringBuffer $ snd tmpFile
+        GHC.liftIO $ putStrLn $ "got buf:[" ++ sbufToString buf ++ "]"
+
+        strSrcWithHead <- GHC.liftIO $ readFile $ snd tmpFile
+        let strSrc = unlines $ drop 3 $ lines strSrcWithHead
+        let strSrcBuf = GHC.stringToStringBuffer strSrc
+
+        GHC.liftIO $ putStrLn $ "got strSrcBuf:[" ++ sbufToString strSrcBuf ++ "]"
+
+        let startLoc = GHC.mkRealSrcLoc (GHC.mkFastString srcFile) 1 1
+        tt <- case GHC.lexTokenStream src startLoc flags of
+                GHC.POk _ ts  -> return ts
+                GHC.PFailed span err ->
+                   do -- dflags <- GHC.getDynFlags
+                      -- GHC.liftIO $ GHC.throwIO $ GHC.mkSrcErr (unitBag $ GHC.mkPlainErrMsg dflags span err)
+                      case GHC.lexTokenStream strSrcBuf startLoc flags of
+                       GHC.POk _ ts  -> return ts
+                       GHC.PFailed span err ->
+                         do dflags <- GHC.getDynFlags
+                            error "parse failed2"
+        GHC.liftIO $ putStrLn $ "got tt:[" ++ show tt ++ "]"
+
+
         -- Tokens ------------------------------------------------------
+        ts <- GHC.getTokenStream (GHC.ms_mod modSum)
+        GHC.liftIO $ putStrLn $ "got ts"
         rts <- GHC.getRichTokenStream (GHC.ms_mod modSum)
+        GHC.liftIO $ putStrLn $ "got rts"
         -- GHC.liftIO (putStrLn $ "tokens=" ++ (showRichTokenStream rts))
         -- GHC.liftIO (putStrLn $ "tokens=" ++ (show $ tokenLocs rts))
         -- GHC.liftIO (putStrLn $ "tokens=" ++ (show $ map (\(GHC.L _ tok,s) -> (tok,s)) rts)) 
@@ -217,7 +241,7 @@ getStuff =
         -- addSourceToTokens :: RealSrcLoc -> StringBuffer -> [Located Token] -> [(Located Token, String)]
         -- let tt = GHC.addSourceToTokens (GHC.mkRealSrcLoc (GHC.mkFastString "f") 1 1) (GHC.stringToStringBuffer "hiding (a,b)") []
         -- GHC.liftIO (putStrLn $ "new tokens=" ++ (showToks tt))
-  
+
 
         -- GHC.liftIO (putStrLn $ "ghcSrcLocs=" ++ (show $ ghcSrcLocs ps))
         -- GHC.liftIO (putStrLn $ "srcLocs=" ++ (show $ srcLocs ps))
@@ -231,31 +255,33 @@ getStuff =
         -- Inscopes ----------------------------------------------------
         -- GHC.liftIO (putStrLn $ "\ninscopes(showData)=" ++ (SYB.showData SYB.Parser 0 $ inscopes))
         -- names <- GHC.parseName "G.mkT"
-        -- GHC.liftIO (putStrLn $ "\nparseName=" ++ (GHC.showPpr $ names))
+        -- GHC.liftIO (putStrLn $ "\nparseName=" ++ (showGhc $ names))
 
 
         -- ParsedSource -----------------------------------------------
-        -- GHC.liftIO (putStrLn $ "parsedSource(Ppr)=" ++ (GHC.showPpr $ GHC.pm_parsed_source p))
+        -- GHC.liftIO (putStrLn $ "parsedSource(Ppr)=" ++ (showGhc $ GHC.pm_parsed_source p))
         -- GHC.liftIO (putStrLn $ "\nparsedSource(showData)=" ++ (SYB.showData SYB.Parser 0 $ GHC.pm_parsed_source p))
 
         -- RenamedSource -----------------------------------------------
-        GHC.liftIO (putStrLn $ "renamedSource(Ppr)=" ++ (GHC.showPpr $ GHC.tm_renamed_source t))
+        GHC.liftIO $ putStrLn $ "about to show renamedSource"
+
+        GHC.liftIO (putStrLn $ "renamedSource(Ppr)=" ++ (showGhc $ GHC.tm_renamed_source t))
         GHC.liftIO (putStrLn $ "\nrenamedSource(showData)=" ++ (SYB.showData SYB.Renamer 0 $ GHC.tm_renamed_source t))
 
-        -- GHC.liftIO (putStrLn $ "typeCheckedSource=" ++ (GHC.showPpr $ GHC.tm_typechecked_source t))
+        -- GHC.liftIO (putStrLn $ "typeCheckedSource=" ++ (showGhc $ GHC.tm_typechecked_source t))
         -- GHC.liftIO (putStrLn $ "typeCheckedSource=" ++ (SYB.showData SYB.TypeChecker 0 $ GHC.tm_typechecked_source t))
 
         -- ModuleInfo ----------------------------------------------------------------
         -- GHC.liftIO (putStrLn $ "moduleInfo.TyThings=" ++ (SYB.showData SYB.Parser 0 $ GHC.modInfoTyThings $ GHC.tm_checked_module_info t))
-        -- GHC.liftIO (putStrLn $ "moduleInfo.TyThings=" ++ (GHC.showPpr $ GHC.modInfoTyThings $ GHC.tm_checked_module_info t))
-        -- GHC.liftIO (putStrLn $ "moduleInfo.TopLevelScope=" ++ (GHC.showPpr $ GHC.modInfoTopLevelScope $ GHC.tm_checked_module_info t))
+        -- GHC.liftIO (putStrLn $ "moduleInfo.TyThings=" ++ (showGhc $ GHC.modInfoTyThings $ GHC.tm_checked_module_info t))
+        -- GHC.liftIO (putStrLn $ "moduleInfo.TopLevelScope=" ++ (showGhc $ GHC.modInfoTopLevelScope $ GHC.tm_checked_module_info t))
 
 
         -- Investigating TypeCheckedModule, in t
-        --GHC.liftIO (putStrLn $ "TypecheckedModule : tm_renamed_source(Ppr)=" ++ (GHC.showPpr $ GHC.tm_renamed_source t))
+        --GHC.liftIO (putStrLn $ "TypecheckedModule : tm_renamed_source(Ppr)=" ++ (showGhc $ GHC.tm_renamed_source t))
         --GHC.liftIO (putStrLn $ "TypecheckedModule : tm_renamed_source(showData)=" ++ (SYB.showData SYB.Parser 0 $ GHC.tm_renamed_source t))
 
-        -- GHC.liftIO (putStrLn $ "TypecheckedModule : tm_typechecked_source(Ppr)=" ++ (GHC.showPpr $ GHC.tm_typechecked_source t))
+        -- GHC.liftIO (putStrLn $ "TypecheckedModule : tm_typechecked_source(Ppr)=" ++ (showGhc $ GHC.tm_typechecked_source t))
         -- GHC.liftIO (putStrLn $ "TypecheckedModule : tm_typechecked_source(showData)=" ++ (SYB.showData SYB.Parser 0 $ GHC.tm_typechecked_source t))
 
 
@@ -263,19 +289,75 @@ getStuff =
         -- GHC.liftIO (putStrLn $ "TypecheckedModuleCoreModule : cm_binds(showData)=" ++ (SYB.showData SYB.TypeChecker 0 $ GHC.mg_binds c))
 
         -- GHC.liftIO (putStrLn $ "TypecheckedModuleCoreModule : cm_binds(showData)=" ++ (SYB.showData SYB.TypeChecker 0 $ GHC.exprsFreeVars $ getBinds $ GHC.mg_binds c))
-        -- GHC.liftIO (putStrLn $ "TypecheckedModuleCoreModule : exprFreeVars cm_binds(showData)=" ++ (GHC.showPpr $ GHC.exprsFreeVars $ getBinds $ GHC.mg_binds c))
-        -- GHC.liftIO (putStrLn $ "TypecheckedModuleCoreModule : exprFreeIds cm_binds(showPpr)=" ++ (GHC.showPpr $ map GHC.exprFreeIds $ getBinds $ GHC.mg_binds c))
+        -- GHC.liftIO (putStrLn $ "TypecheckedModuleCoreModule : exprFreeVars cm_binds(showData)=" ++ (showGhc $ GHC.exprsFreeVars $ getBinds $ GHC.mg_binds c))
+        -- GHC.liftIO (putStrLn $ "TypecheckedModuleCoreModule : exprFreeIds cm_binds(showPpr)=" ++ (showGhc $ map GHC.exprFreeIds $ getBinds $ GHC.mg_binds c))
 
-        -- GHC.liftIO (putStrLn $ "TypecheckedModuleCoreModule : bindFreeVars cm_binds(showPpr)=" ++ (GHC.showPpr $ map GHC.bindFreeVars $ GHC.mg_binds c))
+        -- GHC.liftIO (putStrLn $ "TypecheckedModuleCoreModule : bindFreeVars cm_binds(showPpr)=" ++ (showGhc $ map GHC.bindFreeVars $ GHC.mg_binds c))
 
 
         return ()
+
+-- ---------------------------------------------------------------------
+-- Copied from the GHC source, for debugging
+
+getModuleSourceAndFlags :: GHC.GhcMonad m => GHC.Module -> m (String, GHC.StringBuffer, GHC.DynFlags)
+getModuleSourceAndFlags mod = do
+  m <- GHC.getModSummary (GHC.moduleName mod)
+  case GHC.ml_hs_file $ GHC.ms_location m of
+    Nothing -> do dflags <- GHC.getDynFlags
+                  -- liftIO $ GHC.throwIO $ GHC.mkApiErr dflags (text "No source available for module " <+> GHC.ppr mod)
+                  error $ ("No source available for module " ++ showGhc mod)
+    Just sourceFile -> do
+        source <- GHC.liftIO $ GHC.hGetStringBuffer sourceFile
+        return (sourceFile, source, GHC.ms_hspp_opts m)
+
+-- return our temporary directory within tmp_dir, creating one if we
+-- don't have one yet
+getTempDir :: GHC.DynFlags -> IO FilePath
+getTempDir dflags
+  = do let ref = GHC.dirsToClean dflags
+           tmp_dir = GHC.tmpDir dflags
+       mapping <- readIORef ref
+       case Map.lookup tmp_dir mapping of
+           Nothing -> error "should already be a tmpDir"
+           Just d -> return d
+
+
+
+-- ---------------------------------------------------------------------
+
+sbufToString :: GHC.StringBuffer -> String
+sbufToString sb@(GHC.StringBuffer buf len cur) = GHC.lexemeToString sb len
+
+-- ---------------------------------------------------------------------
+
+getSuffix :: FilePath -> String
+getSuffix fname = reverse $ fst $ break (== '.') $ reverse fname
+
+
+-- | A GHC preprocessed file has the following comments at the top
+-- # 1 "./test/testdata/BCpp.hs"
+-- # 1 "<command-line>"
+-- # 1 "./test/testdata/BCpp.hs"
+-- This function reads the first line of the file and returns the
+-- string in it.
+-- NOTE: no error checking, will blow up if it fails
+getOriginalFile :: FilePath -> IO (FilePath,FilePath)
+getOriginalFile fname = do
+  fcontents <- readFile fname
+  let firstLine = head $ lines fcontents
+  let (_,originalFname) = break (== '"') firstLine
+  return $ (tail $ init $ originalFname,fname)
+
+-- ---------------------------------------------------------------------
+
+
 
 -- processVarUniques :: (SYB.Data a) => a -> IO a
 processVarUniques t = SYB.everywhereMStaged SYB.TypeChecker (SYB.mkM showUnique) t
     where
         showUnique (var :: Var)
-           = do GHC.liftIO $ putStrLn (GHC.showPpr (varUnique var))
+           = do GHC.liftIO $ putStrLn (showGhc (varUnique var))
                 return var
         showUnique x = return x
 
@@ -288,11 +370,11 @@ getBinds xs = map (\(_,x) -> x) $ concatMap getBind xs
     getBind (GHC.NonRec b e) = [(b,e)]
     getBind (GHC.Rec bs) = bs
 
-
+{-
 instance (Show GHC.TyThing) where
   show (GHC.AnId anId) = "(AnId " ++ (show anId) ++ ")"
   show _               = "(Another TyThing)"
-
+-}
 -- instance (Show GHC.Name) where
 
 convertSource ps =1
@@ -326,44 +408,6 @@ ifToCase (GHC.HsIf _se e1 e2 e3)
                    ] undefined)
 ifToCase x                          = x
 
--- -----------------------------------------------------------------------------------------
-
--- Playing with Lens
-
--- 1. Investigate foldMapOf :: Getter a c -> (c ->r) -> a -> r
-
-data Foo = Foo { fa:: Bar String }  deriving (Data,Typeable,Show)
-
-data Bar a = Bar { ba :: Maybe a
-                 , bb :: Baz a
-                 , bc :: [Baz a]
-                 , dc :: a
-                 } deriving (Data,Typeable,Show)
-
-data Baz a = Baz a deriving (Data,Typeable,Show)
-
-td = Foo (Bar Nothing (Baz "Mary") [Baz "a",Baz "b",Baz "c"] "d")
-
-getBaz (Baz b) = [Baz b]
-
-qq :: (Data a) => a -> [Baz String]
-qq = foldMapOf template getBaz
-
-gg = qq td
-
-
--- filtered :: (Gettable f, Applicative f) => (c -> Bool) -> LensLike f a b c d -> LensLike f a b c d
--- hh = filtered isBaz foo
-
--- ii :: (Data a) => a -> [Baz String]
--- ii = foldMapOf hh getBaz
-
--- template :: (Data a, Typeable b) => Simple Traversal a b
-foo :: (Data a, Typeable a) => Simple Traversal a a
-foo = template
-
-isBaz (Baz a) = True
-isBaz _ = False
 
 
 
@@ -377,7 +421,7 @@ isBaz _ = False
 
 -- module Main where
 
- 
+
 -- main = example
 
 example :: IO ()
@@ -397,7 +441,7 @@ example =
         let p' = processParsedMod shortenLists p
         -- GHC.liftIO (putStrLn . showParsedModule $ p)
         -- GHC.liftIO (putStrLn . showParsedModule $ p')
-        GHC.liftIO (putStrLn $ GHC.showPpr $ GHC.tm_typechecked_source p')
+        GHC.liftIO (putStrLn $ showGhc $ GHC.tm_typechecked_source p')
 
 showParsedModule p = SYB.showData SYB.TypeChecker 0 (GHC.tm_typechecked_source p)
 
@@ -406,7 +450,7 @@ processParsedMod f pm = pm { GHC.tm_typechecked_source = ps' }
    ps  = GHC.tm_typechecked_source pm
    -- ps' = SYB.everythingStaged SYB.Parser (SYB.mkT f) -- does not work yet
    -- everythingStaged :: Stage -> (r -> r -> r) -> r -> GenericQ r -> GenericQ r
-   
+
    ps' :: GHC.TypecheckedSource
    ps' = SYB.everywhere (SYB.mkT f) ps -- exception
    -- ps' = everywhereStaged SYB.Parser (SYB.mkT f) ps 
@@ -643,3 +687,10 @@ Ok, modules loaded: Main.
                               (*** Exception: noRebindableInfo
    -}
 
+-- |Show a GHC API structure
+showGhc :: (GHC.Outputable a) => a -> String
+#if __GLASGOW_HASKELL__ > 704
+showGhc x = GHC.showSDoc GHC.tracingDynFlags $ GHC.ppr x
+#else
+showGhc x = GHC.showSDoc                     $ GHC.ppr x
+#endif

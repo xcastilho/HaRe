@@ -1,30 +1,48 @@
-module TestUtils 
+module TestUtils
        ( compareFiles
        , parsedFileGhc
        , parseSourceFileTest
+       , getTestDynFlags
+       , runLogTestGhc
+       , runTestGhc
        , runRefactGhcState
+       , runRefactGhcStateLog
        , initialState
        , initialLogOnState
        , toksFromState
+       , entriesFromState
        , defaultTestSettings
        , logTestSettings
+       , testSettingsMainfile
+       , logTestSettingsMainfile
+       , testCradle
        , catchException
        , mkTokenCache
        , hex
-
+       , unspace
+       , mkTestGhcName
        , setLogger
        ) where
 
 
-import qualified GHC        as GHC
-import qualified GhcMonad   as GHC
-import qualified Outputable as GHC
-import qualified RdrName    as GHC
-import qualified SrcLoc     as GHC
+-- import qualified Bag           as GHC
+-- import qualified BasicTypes    as GHC
+-- import qualified FastString    as GHC
+import qualified GHC           as GHC
+-- import qualified Lexer         as GHC
+-- import qualified Module        as GHC
+import qualified Name          as GHC
+-- import qualified NameSet       as GHC
+-- import qualified Outputable    as GHC
+-- import qualified RdrName       as GHC
+-- import qualified SrcLoc        as GHC
+import qualified Unique        as GHC
+-- import qualified UniqSet       as GHC
 
-import Control.Monad.State
 import Data.Algorithm.Diff
 import Exception
+import Language.Haskell.GhcMod
+-- import Language.Haskell.GhcMod.Internal
 import Language.Haskell.Refact.Utils
 import Language.Haskell.Refact.Utils.LocUtils
 import Language.Haskell.Refact.Utils.Monad
@@ -60,7 +78,7 @@ parsedFileGhc :: String -> IO (ParseResult,[PosToken])
 parsedFileGhc fileName = do
   let
     comp = do
-       res <- parseSourceFileTest fileName 
+       res <- parseSourceFileTest fileName
        return res
   (parseResult,_s) <- runRefactGhcState comp
   return parseResult
@@ -78,7 +96,7 @@ parseSourceFileTest fileName = do
 
 initialState :: RefactState
 initialState = RefSt
-  { rsSettings = RefSet ["./test/testdata/","./testdata"] False
+  { rsSettings = defaultTestSettings
   , rsUniqState = 1
   , rsFlags = RefFlags False
   , rsStorage = StorageNone
@@ -89,7 +107,7 @@ initialState = RefSt
 
 initialLogOnState :: RefactState
 initialLogOnState = RefSt
-  { rsSettings = RefSet ["./test/testdata/"] True
+  { rsSettings = logTestSettings
   , rsUniqState = 1
   , rsFlags = RefFlags False
   , rsStorage = StorageNone
@@ -107,32 +125,83 @@ toksFromState st =
 
 -- ---------------------------------------------------------------------
 
+entriesFromState :: RefactState -> [Entry]
+entriesFromState st =
+  case (rsModule st) of
+    -- Just tm -> retrieveTokens $ (tkCache $ rsTokenCache tm) Map.! mainTid
+    Just tm -> retrieveTokens' $ (tkCache $ rsTokenCache tm) Map.! mainTid
+    Nothing -> []
+
+-- ---------------------------------------------------------------------
+
 mkTokenCache :: Tree Entry -> TokenCache
 mkTokenCache forest = TK (Map.fromList [((TId 0),forest)]) (TId 0)
 
 -- ---------------------------------------------------------------------
 
+getTestDynFlags :: IO GHC.DynFlags
+getTestDynFlags = do
+  (df,_) <- runTestGhc $ GHC.getSessionDynFlags
+  return df
+
+-- ---------------------------------------------------------------------
+
+runLogTestGhc :: RefactGhc a -> IO (a, RefactState)
+runLogTestGhc comp = do
+   res <- runRefactGhc comp $ initialLogOnState
+   return res
+
+-- ---------------------------------------------------------------------
+
+runTestGhc :: RefactGhc a -> IO (a, RefactState)
+runTestGhc comp = do
+   res <- runRefactGhc comp $ initialState
+   return res
+
+-- ---------------------------------------------------------------------
+
 runRefactGhcState :: RefactGhc t -> IO (t, RefactState)
-runRefactGhcState paramcomp = do
+runRefactGhcState paramcomp = runRefactGhcStateLog paramcomp Normal
+
+-- ---------------------------------------------------------------------
+
+runRefactGhcStateLog :: RefactGhc t -> VerboseLevel -> IO (t, RefactState)
+runRefactGhcStateLog paramcomp logOn  = do
   let
-     -- initialState = ReplState { repl_inputState = initInputState }
-     initialState = RefSt
-        { rsSettings = RefSet ["./test/testdata/"] False
+     initState = RefSt
+        { rsSettings = defaultTestSettings { rsetVerboseLevel = logOn }
         , rsUniqState = 1
         , rsFlags = RefFlags False
         , rsStorage = StorageNone
         , rsModule = Nothing
         }
-  (r,s) <- runRefactGhc (initGhcSession >> paramcomp) initialState
+  (r,s) <- runRefactGhc (initGhcSession testCradle (rsetImportPaths defaultTestSettings) >> 
+                                                paramcomp) initState
   return (r,s)
 
 -- ---------------------------------------------------------------------
 
-defaultTestSettings :: Maybe RefactSettings
-defaultTestSettings = Just $ RefSet ["./test/testdata/"] False
+testCradle :: Cradle
+testCradle = Cradle "./test/testdata/" Nothing Nothing Nothing
 
-logTestSettings :: Maybe RefactSettings
-logTestSettings = Just $ RefSet ["./test/testdata/"] True
+-- ---------------------------------------------------------------------
+
+defaultTestSettings :: RefactSettings
+defaultTestSettings = defaultSettings { rsetImportPaths = ["./test/testdata/"]
+                                      , rsetCheckTokenUtilsInvariant = True
+                                      , rsetVerboseLevel = Normal }
+
+logTestSettings :: RefactSettings
+logTestSettings = defaultSettings { rsetImportPaths = ["./test/testdata/"]
+                                  , rsetCheckTokenUtilsInvariant = True
+                                  , rsetVerboseLevel = Debug
+                                  }
+
+testSettingsMainfile :: FilePath -> RefactSettings
+testSettingsMainfile mainFile = defaultTestSettings { rsetMainFile = Just mainFile }
+
+logTestSettingsMainfile :: FilePath -> RefactSettings
+logTestSettingsMainfile mainFile = logTestSettings { rsetMainFile = Just mainFile }
 
 -- ---------------------------------------------------------------------
 
@@ -157,6 +226,27 @@ setLogger = do
   -- s <- streamHandler stdout DEBUG
   h <- fileHandler "debug.log" DEBUG
   updateGlobalLogger rootLoggerName (setHandlers [h])
+
+-- ---------------------------------------------------------------------
+
+-- |Convert any sequence of more than one space to a single space
+unspace :: String -> String
+unspace str = go [] str
+  where
+    go acc []  = acc
+    go acc [x] = acc ++ [x]
+    go acc (' ':' ':xs) = go acc (' ':xs)
+    go acc (x:xs) = go (acc++[x]) xs
+
+-- ---------------------------------------------------------------------
+
+mkTestGhcName :: Int -> Maybe GHC.Module -> String -> GHC.Name
+mkTestGhcName u maybeMod name = n
+  where
+      un = GHC.mkUnique 'H' (u+1) -- H for HaRe :)
+      n = case maybeMod of
+               Nothing -> GHC.localiseName $ GHC.mkSystemName un (GHC.mkVarOcc name)
+               Just modu -> GHC.mkExternalName un modu (GHC.mkVarOcc name) nullSrcSpan
 
 -- ---------------------------------------------------------------------
 

@@ -1,6 +1,6 @@
-module C4  where 
+module Renaming.C4  where 
 
-import D4
+import Renaming.D4
 
 instance SameOrNot Double where
    isSame a  b = a ==b

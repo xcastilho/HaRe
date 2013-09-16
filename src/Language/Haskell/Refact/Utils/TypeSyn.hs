@@ -3,22 +3,21 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+
+-- | This is a legacy module from the pre-GHC HaRe, and will disappear
+-- eventually.
+
 module Language.Haskell.Refact.Utils.TypeSyn where
 
 
 -- Modules from GHC
-import qualified FastString as GHC
 import qualified GHC        as GHC
-import qualified GhcMonad   as GHC
-import qualified HsExpr     as GHC
 import qualified Name       as GHC
 import qualified Outputable as GHC
-import qualified RdrName    as GHC
-import qualified SrcLoc     as GHC
-
-
 
 import Data.Generics
+
 
 {-
 
@@ -83,20 +82,26 @@ type HsName = GHC.RdrName
 -- type PN     = GHC.RdrName
 newtype PName = PN HsName deriving (Eq)
 
+{-
 instance Show PName where
-  show (PN n) = "(PN " ++ (GHC.showRdrName n) ++ ")"
+  -- show (PN n) = "(PN " ++ (GHC.showRdrName n) ++ ")"
+  show (PN n) = "(PN " ++ (showGhc n) ++ ")"
+-}
 
 -- | The PNT is the unique name, after GHC renaming. It corresponds to
 -- GHC.Name data PNT = PNT GHC.Name deriving (Data,Typeable) -- Note:
 -- GHC.Name has SrcLoc in it already
--- ++AZ++ : will run with Located RdrName for now, will see when we need the Unique name
-data PNT = PNT (GHC.Located (GHC.RdrName)) deriving (Data,Typeable,Eq)
 
+
+{- ++AZ++ only needed for some tests
 instance Show PNT where
-  show (PNT (GHC.L l name)) = "(PNT " ++ (GHC.showPpr l) ++ " " ++ (GHC.showRdrName name) ++ ")"
+  -- show (PNT (GHC.L l name)) = "(PNT " ++ (showGhc l) ++ " " ++ (GHC.showRdrName name) ++ ")"
+  show (PNT (GHC.L l name)) = "(PNT " ++ (showGhc l) ++ " " ++ (showGhc name) ++ ")"
+
 
 instance Show (GHC.GenLocated GHC.SrcSpan GHC.Name) where
-  show (GHC.L l name) = "(" ++ (GHC.showPpr l) ++ " " ++ (GHC.showPpr $ GHC.nameUnique name) ++ " " ++ (GHC.showPpr name) ++ ")"
+  show (GHC.L l name) = "(" ++ (showGhc l) ++ " " ++ (showGhc $ GHC.nameUnique name) ++ " " ++ (showGhc name) ++ ")"
+only for tests end -}
 
 instance Show GHC.NameSpace where
   show ns
@@ -200,18 +205,20 @@ instance Ord OptSrcLoc where compare _ _ = EQ
 -- ---------------------------------------------------------------------
 -- Putting these here for the time being, to avoid import loops
 
+ghead :: String -> [a] -> a
+ghead  info []    = error $ "ghead "++info++" []"
+ghead _info (h:_) = h
 
-ghead info []    = error $ "ghead "++info++" []"
-ghead info (h:_) = h
+glast :: String -> [a] -> a
+glast  info []    = error $ "glast " ++ info ++ " []"
+glast _info h     = last h
 
-glast info []    = error $ "glast " ++ info ++ " []"
-glast info h     = last h
+gtail :: String -> [a] -> [a]
+gtail  info []   = error $ "gtail " ++ info ++ " []"
+gtail _info h    = tail h
 
-gtail info []   = error $ "gtail " ++ info ++ " []"
-gtail info h    = tail h
-
-gfromJust info (Just h) = h
-gfromJust info Nothing = error $ "gfromJust " ++ info ++ " Nothing"
-
+gfromJust :: [Char] -> Maybe a -> a
+gfromJust _info (Just h) = h
+gfromJust  info Nothing = error $ "gfromJust " ++ info ++ " Nothing"
 
 -- ---------------------------------------------------------------------

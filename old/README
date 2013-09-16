@@ -36,6 +36,7 @@ WE DO NOT RECOMMEND TO USE THIS PROTOTYPE ON YOUR PRODUCTION SOURCES JUST YET!
   5. If you intend on running the test suite, HUnit-1.0.
 
 A [recommended] partial build
+
   (fewer tools needed, but tied to particular snapshot):
 
   1. fetch refactorer snapshot. this includes:

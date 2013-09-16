@@ -9,18 +9,14 @@ import qualified Digraph    as GHC
 import qualified FastString as GHC
 import qualified GHC        as GHC
 import qualified GhcMonad   as GHC
-import qualified Name       as GHC
-import qualified Outputable as GHC
-import qualified RdrName    as GHC
-import qualified SrcLoc     as GHC
 
 import Control.Monad.State
 import Data.Maybe
 import Language.Haskell.Refact.Utils
+import Language.Haskell.Refact.Utils.GhcVersionSpecific
+import Language.Haskell.Refact.Utils.LocUtils
 import Language.Haskell.Refact.Utils.Monad
 import Language.Haskell.Refact.Utils.MonadFunctions
-import Language.Haskell.Refact.Utils.TokenUtils
-import Language.Haskell.Refact.Utils.LocUtils
 import Language.Haskell.Refact.Utils.TypeSyn
 import Language.Haskell.Refact.Utils.TypeUtils
 
@@ -28,7 +24,7 @@ import Language.Haskell.Refact.Utils.TypeUtils
 
 main :: IO ()
 main = do
-  setLogger
+  -- setLogger
   hspec spec
 
 spec :: Spec
@@ -64,12 +60,22 @@ spec = do
   describe "locToExp on RenamedSource" $ do
     it "finds the largest leftmost expression contained in a given region #1" $ do
       -- ((_, Just renamed, _), toks) <- parsedFileBGhc
-      (t, toks) <- parsedFileBGhc
+      (t, _toks) <- parsedFileBGhc
       let renamed = fromJust $ GHC.tm_renamed_source t
 
       let (Just expr) = locToExp (7,7) (7,43) renamed :: Maybe (GHC.Located (GHC.HsExpr GHC.Name))
       getLocatedStart expr `shouldBe` (7,9)
       getLocatedEnd   expr `shouldBe` (7,42)
+
+  -- -------------------------------------------------------------------
+
+  describe "loading a file" $ do
+    it "loads a file having the LANGUAGE CPP pragma" $ do
+      (t, toks) <- parsedFileBCppGhc
+      let renamed = fromJust $ GHC.tm_renamed_source t
+
+      let (Just expr) = locToExp (6,1) (12,1) renamed :: Maybe (GHC.Located (GHC.HsExpr GHC.Name))
+      (show $ take 14 toks) `shouldBe` "[((((1,1),(1,35)),ITblockComment \" FlexibleInstances #\"),\"{-# LANGUAGE FlexibleInstances #-}\"),((((2,1),(2,21)),ITblockComment \" CPP #\"),\"{-# LANGUAGE CPP #-}\"),((((3,1),(3,53)),ITlineComment \"-- Check that we can parse a file which requires CPP\"),\"-- Check that we can parse a file which requires CPP\"),((((4,1),(4,7)),ITmodule),\"module\"),((((4,8),(4,12)),ITconid \"BCpp\"),\"BCpp\"),((((4,13),(4,18)),ITwhere),\"where\"),((((6,1),(6,1)),ITvocurly),\"\"),((((6,1),(6,4)),ITvarid \"bob\"),\"bob\"),((((6,5),(6,7)),ITdcolon),\"::\"),((((6,8),(6,11)),ITconid \"Int\"),\"Int\"),((((6,12),(6,14)),ITrarrow),\"->\"),((((6,15),(6,18)),ITconid \"Int\"),\"Int\"),((((6,19),(6,21)),ITrarrow),\"->\"),((((6,22),(6,25)),ITconid \"Int\"),\"Int\")]"
 
   -- -------------------------------------------------------------------
 
@@ -95,16 +101,16 @@ spec = do
   describe "getModuleName" $ do
     it "returns a string for the module name if there is one" $ do
       -- modInfo@((_, _, mod), toks) <- parsedFileBGhc
-      modInfo@(t, toks) <- parsedFileBGhc
+      (t, _toks) <- parsedFileBGhc
       let mod = GHC.pm_parsed_source $ GHC.tm_parsed_module t
 
-      let (Just (modname,modNameStr)) = getModuleName mod
+      let (Just (_modname,modNameStr)) = getModuleName mod
       -- let modNameStr = "foo"
       modNameStr `shouldBe` "TypeUtils.B"
 
     it "returns Nothing for the module name otherwise" $ do
       -- modInfo@((_, _, mod), toks) <- parsedFileNoMod
-      modInfo@(t, toks) <- parsedFileNoMod
+      (t, _toks) <- parsedFileNoMod
       let mod = GHC.pm_parsed_source $ GHC.tm_parsed_module t
       getModuleName mod `shouldBe` Nothing
 
@@ -124,20 +130,20 @@ spec = do
       -- TODO: harvest this commonality
       let
         comp = do
-         (p,toks) <- parseFileMGhc -- Load the main file first
+         (_p,_toks) <- parseFileMGhc -- Load the main file first
          g <- clientModsAndFiles $ GHC.mkModuleName "S1"
          return g
       (mg,_s) <- runRefactGhcState comp
-      GHC.showPpr (map GHC.ms_mod mg) `shouldBe` "[main:M2, main:M3, main:Main]"
+      showGhc (map GHC.ms_mod mg) `shouldBe` "[main:M2, main:M3, main:Main]"
 
     it "gets modules which directly or indirectly import a module #2" $ do
       let
         comp = do
-         (p,toks) <- parseFileMGhc -- Load the main file first
+         (_p,_toks) <- parseFileMGhc -- Load the main file first
          g <- clientModsAndFiles $ GHC.mkModuleName "M3"
          return g
       (mg,_s) <- runRefactGhcState comp
-      GHC.showPpr (map GHC.ms_mod mg) `shouldBe` "[main:Main]"
+      showGhc (map GHC.ms_mod mg) `shouldBe` "[main:Main]"
 
   -- -------------------------------------------------------------------
 
@@ -148,20 +154,20 @@ spec = do
     it "gets modules which are directly or indirectly imported by a module #1" $ do
       let
         comp = do
-         (p,toks) <- parseFileMGhc -- Load the main file first
+         (_p,toks) <- parseFileMGhc -- Load the main file first
          g <- serverModsAndFiles $ GHC.mkModuleName "S1"
          return g
       (mg,_s) <- runRefactGhcState comp
-      GHC.showPpr (map GHC.ms_mod mg) `shouldBe` "[]"
+      showGhc (map GHC.ms_mod mg) `shouldBe` "[]"
 
     it "gets modules which are directly or indirectly imported by a module #2" $ do
       let
         comp = do
-         (p,toks) <- parseFileMGhc -- Load the main file first
+         (_p,_toks) <- parseFileMGhc -- Load the main file first
          g <- serverModsAndFiles $ GHC.mkModuleName "M3"
          return g
       (mg,_s) <- runRefactGhcState comp
-      GHC.showPpr (map GHC.ms_mod mg) `shouldBe` "[main:M2, main:S1]"
+      showGhc (map GHC.ms_mod mg) `shouldBe` "[main:M2, main:S1]"
 
 
   -- -------------------------------------------------------------------
@@ -170,7 +176,7 @@ spec = do
     it "gets the module graph for the currently loaded modules" $ do
       let
         comp = do
-         (p,toks) <- parseFileBGhc -- Load the file first
+         (_p,_toks) <- parseFileBGhc -- Load the file first
          g <- getCurrentModuleGraph
          return g
       (mg,_s) <- runRefactGhcState comp
@@ -188,11 +194,11 @@ spec = do
     it "needs a test or two" $ do
       let
         comp = do
-         (p,toks) <- parseFileBGhc -- Load the file first
+         (_p,_toks) <- parseFileBGhc -- Load the file first
          g <- sortCurrentModuleGraph
          return g
       (mg,_s) <- runRefactGhcState comp
-      (GHC.showPpr $ map (\m -> GHC.ms_mod m) (GHC.flattenSCCs mg)) `shouldBe` "[main:TypeUtils.C, main:TypeUtils.B]"
+      (showGhc $ map (\m -> GHC.ms_mod m) (GHC.flattenSCCs mg)) `shouldBe` "[main:TypeUtils.C, main:TypeUtils.B]"
 
   -- -------------------------------------------------------------------
 
@@ -212,7 +218,7 @@ spec = do
       let parsed = GHC.pm_parsed_source $ GHC.tm_parsed_module t
 
       (show $ getModuleName parsed) `shouldBe` "Just (S1,\"S1\")"
-      GHC.showPpr (map GHC.ms_mod mg) `shouldBe` "[main:M2, main:M3, main:Main]"
+      showGhc (map GHC.ms_mod mg) `shouldBe` "[main:M2, main:M3, main:Main]"
 
     -- ---------------------------------
 
@@ -230,7 +236,7 @@ spec = do
       let parsed = GHC.pm_parsed_source $ GHC.tm_parsed_module t
 
       (show $ getModuleName parsed) `shouldBe` "Just (S1,\"S1\")"
-      GHC.showPpr (map GHC.ms_mod mg) `shouldBe` "[]"
+      showGhc (map GHC.ms_mod mg) `shouldBe` "[]"
 
     -- ---------------------------------
 
@@ -248,20 +254,46 @@ spec = do
       (( ( (t,_)), mg ), _s) <- runRefactGhcState comp
       let parsed = GHC.pm_parsed_source $ GHC.tm_parsed_module t
       (show $ getModuleName parsed) `shouldBe` "Just (DupDef.Dd1,\"DupDef.Dd1\")"
-      GHC.showPpr (map GHC.ms_mod mg) `shouldBe` "[main:DupDef.Dd2]"
+      showGhc (map GHC.ms_mod mg) `shouldBe` "[main:DupDef.Dd2]"
 
 
   -- -------------------------------------------------------------------
 
   describe "runRefactGhc" $ do
     it "contains a State monad" $ do
+      let
+       comp = do
+        s <- get
+        (_t, _toks) <- parseSourceFileTest "./test/testdata/TypeUtils/B.hs"
+
+        g <- GHC.getModuleGraph
+        gs <- mapM GHC.showModule g
+        -- GHC.liftIO (putStrLn $ "modulegraph=" ++ (show gs))
+
+        put (s {rsUniqState = 100})
+        return (show gs)
+
       (_,s) <- runRefactGhcState comp
       (rsUniqState s) `shouldBe` 100
 
     it "contains the GhcT monad" $ do
+      let
+       comp = do
+        s <- get
+        (_t, _toks) <- parseSourceFileTest "./test/testdata/TypeUtils/B.hs"
+
+        g <- GHC.getModuleGraph
+        gs <- mapM GHC.showModule g
+        -- GHC.liftIO (putStrLn $ "modulegraph=" ++ (show gs))
+
+        put (s {rsUniqState = 100})
+        return (show gs)
+
       (r,_) <- runRefactGhcState comp
-      r `shouldBe` ("[\"TypeUtils.B      ( test/testdata/TypeUtils/B.hs, interpreted )\""
-                  ++",\"TypeUtils.C      ( test/testdata/TypeUtils/C.hs, interpreted )\"]")
+      -- r `shouldBe` ("[\"TypeUtils.B      ( test/testdata/TypeUtils/B.hs, interpreted )\""
+      --             ++",\"TypeUtils.C      ( test/testdata/TypeUtils/C.hs, interpreted )\"]")
+      r `shouldBe` ("[\"TypeUtils.B      ( test/testdata/TypeUtils/B.hs, nothing )\""
+                  ++",\"TypeUtils.C      ( test/testdata/TypeUtils/C.hs, nothing )\"]")
 
 
   -- -------------------------------------------------------------------
@@ -291,6 +323,9 @@ bFileName = GHC.mkFastString "./test/testdata/TypeUtils/B.hs"
 parsedFileBGhc :: IO (ParseResult,[PosToken])
 parsedFileBGhc = parsedFileGhc "./test/testdata/TypeUtils/B.hs"
 
+parsedFileBCppGhc :: IO (ParseResult,[PosToken])
+parsedFileBCppGhc = parsedFileGhc "./test/testdata/BCpp.hs"
+
 parsedFileMGhc :: IO (ParseResult,[PosToken])
 parsedFileMGhc = parsedFileGhc "./test/testdata/M.hs"
 
@@ -304,22 +339,10 @@ parseFileMGhc = parseSourceFileTest fileName
   where
     fileName = "./test/testdata/M.hs"
 
--- parsedFileNoMod = unsafeParseSourceFile fileName
-parsedFileNoMod = parsedFileGhc fileName
-  where
-    fileName = "./test/testdata/NoMod.hs"
 
-comp :: RefactGhc String
-comp = do
-    s <- get
-    modInfo@(t, toks) <- parseSourceFileTest "./test/testdata/TypeUtils/B.hs"
+parsedFileNoMod :: IO (ParseResult,[PosToken])
+parsedFileNoMod = parsedFileGhc "./test/testdata/NoMod.hs"
 
-    g <- GHC.getModuleGraph
-    gs <- mapM GHC.showModule g
-    GHC.liftIO (putStrLn $ "modulegraph=" ++ (show gs))
-
-    put (s {rsUniqState = 100})
-    return (show gs)
 
 
 -- ---------------------------------------------------------------------

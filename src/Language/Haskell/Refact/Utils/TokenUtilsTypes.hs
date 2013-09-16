@@ -38,7 +38,7 @@ associated srcloc, due to leading / trailing comments
 SrcSpans are nested in one another according to the structure of the
 AST.
 
-Store it in some kind of tree structure, memoised.
+Store it in some kind of tree structure.
 
 Invariants:
   1. For each tree, either the rootLabel has a SrcSpan only, or the subForest /= [].
@@ -46,21 +46,35 @@ Invariants:
      i.e. the leaves contain all the tokens for a given SrcSpan.
   3. A given SrcSpan can only appear (or be included) in a single tree of the forest.
 
+There are conflicting requirements for access to the tokens. On the
+one hand the tokens need to be moved around (mainly in columns) to
+support changing layout as e.g. a token is renamed. On the other, the
+originals need to be preserved, so they can tie up with the positions
+in the SrcSpans and for renaming.
+
+Question: is the latter statement valid? ++AZ++
+
 -}
 
 -- TODO: turn this into a record, with named accessors
 -- | An entry in the data structure for a particular srcspan.
-data Entry = Entry !ForestSpan -- ^The source span contained in this Node
-                   ![PosToken] -- ^The tokens for the SrcSpan if subtree is empty
+data Entry = Entry !ForestSpan -- The source span contained in this Node
+                   ![PosToken] -- ^The tokens for the SrcSpan if
+                               --  subtree is empty
+           | Deleted !ForestSpan -- The source span has been deleted
+                     SimpPos     -- ^The gap between this span end and
+                                 --  the start of the next in the
+                                 --  fringe of the tree.
+
 --             deriving (Show)
 
 -- ---------------------------------------------------------------------
 
 data ForestLine = ForestLine
                   { flSpanLengthChanged :: !Bool -- ^The length of the
-                                                -- span may have
-                                                -- changed due to
-                                                -- updated tokens.
+                                                 -- span may have
+                                                 -- changed due to
+                                                 -- updated tokens.
                   , flTreeSelector  :: !Int
                   , flInsertVersion :: !Int
                   , flLine          :: !Int

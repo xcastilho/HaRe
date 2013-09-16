@@ -1,5 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-module Language.Haskell.Refact.DupDef(duplicateDef, doDuplicateDef) where
+module Language.Haskell.Refact.DupDef(duplicateDef) where
 
 import qualified Data.Generics as SYB
 import qualified GHC.SYB.Utils as SYB
@@ -7,48 +7,33 @@ import qualified GHC.SYB.Utils as SYB
 import qualified FastString            as GHC
 import qualified GHC
 import qualified OccName               as GHC
-import qualified Outputable            as GHC
 
-import Control.Monad.State
 import Data.List
 import Data.Maybe
 
+import Language.Haskell.GhcMod
 import Language.Haskell.Refact.Utils
 import Language.Haskell.Refact.Utils.GhcUtils
+import Language.Haskell.Refact.Utils.GhcVersionSpecific
 import Language.Haskell.Refact.Utils.LocUtils
 import Language.Haskell.Refact.Utils.Monad
 import Language.Haskell.Refact.Utils.MonadFunctions
-import Language.Haskell.Refact.Utils.TokenUtils
 import Language.Haskell.Refact.Utils.TypeSyn
 import Language.Haskell.Refact.Utils.TypeUtils
 
 -- ---------------------------------------------------------------------
--- | This refactoring duplicates a definition(function binding or
--- simple pattern binding) at same level with a new name provided by
+-- | This refactoring duplicates a definition (function binding or
+-- simple pattern binding) at the same level with a new name provided by
 -- the user. The new name should not cause name clash/capture.
-
--- TODO: This boilerplate will be moved to the coordinator, just comp will be exposed
-doDuplicateDef :: [String] -> IO () -- For now
-doDuplicateDef args
- = do let fileName = ghead "filename" args
-          newName  = args!!1
-          row      = read (args!!2)::Int
-          col      = read (args!!3)::Int
-      duplicateDef Nothing  Nothing fileName newName (row,col)
-      return ()
-
--- | The API entry point
-duplicateDef :: Maybe RefactSettings -> Maybe FilePath -> FilePath -> String -> SimpPos -> IO ()
-duplicateDef settings maybeMainFile fileName newName (row,col) =
-  runRefacSession settings maybeMainFile (comp fileName newName (row,col))
-
+duplicateDef :: RefactSettings -> Cradle -> FilePath -> String -> SimpPos -> IO [FilePath]
+duplicateDef settings cradle fileName newName (row,col) =
+  runRefacSession settings cradle (comp fileName newName (row,col))
 
 comp :: FilePath -> String -> SimpPos
      -> RefactGhc [ApplyRefacResult]
 comp fileName newName (row, col) = do
       if isVarId newName
-        then do -- loadModuleGraphGhc maybeMainFile
-                -- modInfo@(t, _tokList) <- getModuleGhc fileName
+        then do
                 getModuleGhc fileName
                 renamed <- getRefactRenamed
                 parsed  <- getRefactParsed
@@ -64,10 +49,10 @@ comp fileName newName (row, col) = do
                             False -> error "The selected identifier is not a function/simple pattern name, or is not defined in this module "
                             True -> return ()
 
-                          if modIsExported parsed
+                          if modIsExported modName renamed
                            then do clients <- clientModsAndFiles modName
-                                   logm ("DupDef: clients=" ++ (GHC.showPpr clients)) -- ++AZ++ debug
-                                   refactoredClients <- mapM (refactorInClientMod modName 
+                                   logm ("DupDef: clients=" ++ (showGhc clients)) -- ++AZ++ debug
+                                   refactoredClients <- mapM (refactorInClientMod (GHC.unLoc pn) modName 
                                                              (findNewPName newName renamed')) clients
                                    return $ refactoredMod:refactoredClients
                            else  return [refactoredMod]
@@ -81,7 +66,6 @@ doDuplicating :: GHC.Located GHC.Name -> String
 doDuplicating pn newName = do
    inscopes <- getRefactInscopes
    renamed  <- getRefactRenamed
-   parsed   <- getRefactParsed
    reallyDoDuplicating pn newName inscopes renamed
 
 
@@ -126,7 +110,7 @@ reallyDoDuplicating pn newName inscopes renamed = do
 
         --6.The definition to be duplicated is a local decl in a Let statement.
         dupInLetStmt (letStmt@(GHC.LetStmt ds):: GHC.Stmt GHC.Name)
-           -- |findFunOrPatBind pn ds /=[]=doDuplicating' inscps letStmt pn
+           -- was |findFunOrPatBind pn ds /=[]=doDuplicating' inscps letStmt pn
            |not $ emptyList (findFunOrPatBind pn (hsBinds ds)) = doDuplicating' inscopes letStmt pn
         dupInLetStmt letStmt = return letStmt
 
@@ -137,7 +121,7 @@ reallyDoDuplicating pn newName inscopes renamed = do
 
         doDuplicating' :: (HsValBinds t) => InScopes -> t -> GHC.Located GHC.Name
                        -> RefactGhc (t)
-        doDuplicating' inscps parentr ln@(GHC.L _ n)
+        doDuplicating' _inscps parentr ln@(GHC.L _ n)
            = do let
                     declsr = hsBinds parentr
 
@@ -148,15 +132,15 @@ reallyDoDuplicating pn newName inscopes renamed = do
                     --f: names that might be shadowd by the new name,
                     --d: names that might clash with the new name
 
-                dv <- hsVisibleNames ln declsr --dv: names may shadow new name
+                let dv = hsVisibleNames ln declsr --dv: names may shadow new name
                 let vars        = nub (f `union` d `union` dv)
 
-                newNameGhc <- mkNewGhcName newName
+                newNameGhc <- mkNewGhcName Nothing newName
                 -- TODO: Where definition is of form tup@(h,t), test each element of it for clashes, or disallow
-                nameAlreadyInScope <- isInScopeAndUnqualifiedGhc newName
+                nameAlreadyInScope <- isInScopeAndUnqualifiedGhc newName Nothing
 
                 -- logm ("DupDef: nameAlreadyInScope =" ++ (show nameAlreadyInScope)) -- ++AZ++ debug
-                logm ("DupDef: ln =" ++ (show ln)) -- ++AZ++ debug
+                -- logm ("DupDef: ln =" ++ (show ln)) -- ++AZ++ debug
 
                 if elem newName vars || (nameAlreadyInScope && findEntity ln duplicatedDecls) 
                    then error ("The new name'"++newName++"' will cause name clash/capture or ambiguity problem after "
@@ -183,11 +167,11 @@ findNewPName name renamed = gfromJust "findNewPName" res
 -- | Do refactoring in the client module. That is to hide the
 -- identifer in the import declaration if it will cause any problem in
 -- the client module.
-refactorInClientMod :: GHC.ModuleName -> GHC.Name -> GHC.ModSummary
+refactorInClientMod :: GHC.Name -> GHC.ModuleName -> GHC.Name -> GHC.ModSummary
                     -> RefactGhc ApplyRefacResult
-refactorInClientMod serverModName newPName modSummary
+refactorInClientMod oldPN serverModName newPName modSummary
   = do
-       logm ("refactorInClientMod: (serverModName,newPName)=" ++ (GHC.showPpr (serverModName,newPName))) -- ++AZ++ debug
+       logm ("refactorInClientMod: (serverModName,newPName)=" ++ (showGhc (serverModName,newPName))) -- ++AZ++ debug
        let fileName = gfromJust "refactorInClientMod" $ GHC.ml_hs_file $ GHC.ms_location modSummary
        -- modInfo@(t,ts) <- getModuleGhc fileName
        getModuleGhc fileName
@@ -196,11 +180,11 @@ refactorInClientMod serverModName newPName modSummary
        parsed <- getRefactParsed
 
        let modNames = willBeUnQualImportedBy serverModName renamed
-       logm ("refactorInClientMod: (modNames)=" ++ (GHC.showPpr (modNames))) -- ++AZ++ debug
+       logm ("refactorInClientMod: (modNames)=" ++ (showGhc (modNames))) -- ++AZ++ debug
 
        -- if isJust modNames && needToBeHided (pNtoName newPName) exps parsed
        mustHide <- needToBeHided newPName renamed parsed
-       logm ("refactorInClientMod: (mustHide)=" ++ (GHC.showPpr (mustHide))) -- ++AZ++ debug
+       logm ("refactorInClientMod: (mustHide)=" ++ (showGhc (mustHide))) -- ++AZ++ debug
        if isJust modNames && mustHide
         then do
                 -- refactoredMod <- applyRefac (doDuplicatingClient serverModName [newPName]) (Just modInfo) fileName
@@ -211,9 +195,8 @@ refactorInClientMod serverModName newPName modSummary
      needToBeHided :: GHC.Name -> GHC.RenamedSource -> GHC.ParsedSource -> RefactGhc Bool
      needToBeHided name exps parsed = do
          let usedUnqual = usedWithoutQualR name parsed
-         logm ("refactorInClientMod: (usedUnqual)=" ++ (GHC.showPpr (usedUnqual))) -- ++AZ++ debug
-         return $ usedUnqual || causeNameClashInExports name serverModName exps
-
+         logm ("refactorInClientMod: (usedUnqual)=" ++ (showGhc (usedUnqual))) -- ++AZ++ debug
+         return $ usedUnqual || causeNameClashInExports oldPN name serverModName exps
 
 doDuplicatingClient :: GHC.ModuleName -> [GHC.Name]
               -> RefactGhc ()
@@ -245,9 +228,9 @@ refactorInClientMod serverModName newPName (modName, fileName)
 -- | get the module name or alias name by which the duplicated
 -- definition will be imported automatically.
 willBeUnQualImportedBy :: GHC.ModuleName -> GHC.RenamedSource -> Maybe [GHC.ModuleName]
-willBeUnQualImportedBy modName renamed@(_,imps,_,_)
+willBeUnQualImportedBy modName (_,imps,_,_)
    = let
-         ms = filter (\(GHC.L _ (GHC.ImportDecl (GHC.L _ modName1) qualify _source _safe isQualified _isImplicit as h))
+         ms = filter (\(GHC.L _ (GHC.ImportDecl (GHC.L _ modName1) _qualify _source _safe isQualified _isImplicit _as h))
                     -> modName == modName1
                        && not isQualified
                               && (isNothing h  -- not hiding
@@ -258,7 +241,7 @@ willBeUnQualImportedBy modName renamed@(_,imps,_,_)
          in if (emptyList ms) then Nothing
                       else Just $ nub $ map getModName ms
 
-         where getModName (GHC.L _ (GHC.ImportDecl modName1 qualify _source _safe isQualified _isImplicit as h))
+         where getModName (GHC.L _ (GHC.ImportDecl _modName1 _qualify _source _safe _isQualified _isImplicit as _h))
                  = if isJust as then (fromJust as)
                                 else modName
                -- simpModName (SN m loc) = m

@@ -1,25 +1,53 @@
 Name:                           HaRe
-Version:                        0.6.0.3
-Author:                         Chris Brown, Huiqing Li, Simon Thompson
-Maintainer:                     Chris Brown
-Stability:                      Provisional
-Bug-Reports:                    mailto:chrisb@cs.st-andrews.ac.uk
+Version:                        0.7.0.5
+Author:                         Chris Brown, Huiqing Li, Simon Thompson, Alan Zimmerman
+Maintainer:                     Alan Zimmerman
+Stability:                      Alpha
+Bug-Reports:                    http://github.com/alanz/HaRe/issues
 License:                        BSD3
 License-File:                   LICENSE
 Homepage:                       http://www.cs.kent.ac.uk/projects/refactor-fp
-Description:                    A full Haskell 98 refactoring tool. HaRe supports the full Haskell 98 standard, implemented in Haskell and supporting Emacs and VIm.
+Description:
+   A Haskell 2010 refactoring tool. HaRe supports the full
+   Haskell 2010 standard, through making use of the GHC API.
+   .
+   It is tested against GHC 7.4.x and 7.6.x
+   .
+   It currently only has emacs integration built in, community input
+   welcome for others.
+   .
+   Warning: This is alpha code. Always commit code to your version
+   control system before refactoring. The developers make no
+   warranties, use at your own risk. May frighten children and dogs.
+   .
+   Current known defects:
+   .
+     * After renaming, the layout of surrounding 'do','let','where' or
+      'of' clauses is not adjusted. This can cause problems if the new
+      name is a different length from the old one.
+   .
+     * liftToTopLevel of a recursive function may introduce parameter
+       errors. e.g. lifting 'g' in the 'zmapQ' function from 'syz-0.2.0.0'
+       'Data.Generics.Zipper' results in the following
+   .
+   >  zmapQ f z = reverse $ downQ [] g z where
+   >       g z' = query f z' : leftQ [] g z'
+   .
+      becomes
+   .
+   >  zmapQ f z = reverse $ downQ [] (g f g)z
+   >
+   >  g f z'g= query f z' : leftQ [] (g f g)g f g)z'
+
 Synopsis:                       the Haskell Refactorer.
 Category:                       Development, Refactoring
 Cabal-Version:                  >= 1.8
 Build-Type:                     Simple
-Data-Dir:                       misc
-
-
-flag hpc
-  default: False
+data-files:                     elisp/*.el
+data-Dir:                       .
 
 Library
-        Build-Depends:          base >=4
+        Build-Depends:          base >= 4.0  && < 4.7
                                 , containers
                                 , directory
                                 , filepath
@@ -27,7 +55,7 @@ Library
                                 , ghc-paths
                                 , ghc-prim
                                 , ghc-syb-utils
-                                , lens >= 3.0
+                                , ghc-mod >= 2.1.2
                                 , mtl
                                 , old-time
                                 , pretty
@@ -35,14 +63,11 @@ Library
                                 , syb
                                 , hslogger
                                 , transformers
+                                , time
                                 , Strafunski-StrategyLib
-                                -- , uniplate
+                                , syz
 
         -- GHC-Options:             -Wall
-        -- We want to run coverage reports on the library
-        if flag(hpc)
-          ghc-options: -fhpc
-          -- GHC-Options:             -fhpc
 
         Hs-Source-Dirs:         src
         Other-Modules:          Paths_HaRe
@@ -50,11 +75,14 @@ Library
              Language.Haskell.Refact.Case
            , Language.Haskell.Refact.DupDef
            , Language.Haskell.Refact.MoveDef
+           , Language.Haskell.Refact.Renaming
            , Language.Haskell.Refact.SwapArgs
            , Language.Haskell.Refact.Transact
            , Language.Haskell.Refact.Utils
+           , Language.Haskell.Refact.Utils.GhcBugWorkArounds
            , Language.Haskell.Refact.Utils.GhcModuleGraph
            , Language.Haskell.Refact.Utils.GhcUtils
+           , Language.Haskell.Refact.Utils.GhcVersionSpecific
            , Language.Haskell.Refact.Utils.LocUtils
            , Language.Haskell.Refact.Utils.Monad
            , Language.Haskell.Refact.Utils.MonadFunctions
@@ -63,16 +91,21 @@ Library
            , Language.Haskell.Refact.Utils.TokenUtilsTypes
            , Language.Haskell.Refact.Utils.TypeSyn
            , Language.Haskell.Refact.Utils.TypeUtils
+        Extensions:      CPP
 
 
 
 Executable ghc-hare
-        Main-Is:                Main.hs
+        -- Main-Is:                Main.hs
+        Main-Is:                MainHaRe.hs
+        -- Other-Modules:          Paths_HaRe
         -- GHC-Options:            -Wall
+        -- GHC-Options:            -prof -fprof-auto -rtsopts -caf-all
         Hs-Source-Dirs:
           ./src
-        Build-Depends:          base >=4
+        Build-Depends:          base >= 4.0  && < 4.7
                                 , array
+                                -- TODO: remove cmdtheline
                                 , cmdtheline >= 0.2.1
                                 , containers
                                 , directory
@@ -81,17 +114,20 @@ Executable ghc-hare
                                 , ghc-paths
                                 , ghc-prim
                                 , ghc-syb-utils
-                                , lens >= 3.0
+                                , ghc-mod >= 2.1.2
                                 , mtl
                                 , old-time
+                                , parsec
                                 , pretty
                                 , rosezipper
                                 , syb
+                                , time
                                 , transformers
                                 , hslogger
                                 , Strafunski-StrategyLib
-                                -- , uniplate
-        Other-Modules:          Paths_HaRe
+                                , syz
+                                , HaRe >= 0.7.0.0
+        Extensions:      CPP
 
 
 test-suite spec
@@ -119,12 +155,12 @@ test-suite spec
     , deepseq
     , directory
     , filepath
-    , ghc         >= 6.12 && < 7.8
+    , ghc         >= 7.0.1 && < 7.8
     , ghc-paths   == 0.1.*
     , ghc-prim
     , ghc-syb-utils
+    , ghc-mod >= 2.1.2
     , hspec       == 1.4.*
-    , lens >= 3.0
     , mtl
     , old-time
     , process
@@ -133,8 +169,13 @@ test-suite spec
     , rosezipper
     , syb
     , transformers
-    -- , uniplate
+    , time
     , hslogger
     , Strafunski-StrategyLib
-    , HaRe >= 0.6.0.3
+    , syz
+    , HaRe >= 0.7.0.0
+  Extensions:      CPP
 
+source-repository head
+  type:     git
+  location: https://github.com/alanz/HaRe.git
