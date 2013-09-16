@@ -105,6 +105,14 @@ doTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n) = do
     inscopes <- getRefactInscopes
     renamed  <- getRefactRenamed
     parsed   <- getRefactParsed
+
+    -- try adding the import declaration at this point
+
+    let stmModName  = GHC.mkModuleName "Control.Concurrent.STM"
+    newRenamed  <- addImportDecl renamed stmModName Nothing False False False Nothing False []
+
+    -- /adding import
+
     typechecked <- liftM GHC.tm_typechecked_source getTypecheckedModule -- >>= (return.GHC.tm_typechecked_source)
     reallyDoTransact pnt name renamed typechecked
 --    reallyDoTransact pnt name renamed
@@ -136,9 +144,10 @@ reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed typechecked = d
     let typenames = map getTypeName rightTypes
     liftIO $ putStrLn ("checkedVarsfound ("++(show lVars)++"):: "++ show (map (SYB.showData SYB.TypeChecker 0) typecheckedTypes)) --SYB.showData SYB.TypeChecker 0 typecheckedVars )
     liftIO $ putStrLn ("varsTypes: "++show typenames)
-    let successful = (length typenames) == 1 && (head typenames) == "GHC.MVar.MVar"
+    let headtypename = head typenames
+    let successful = {-(length typenames) == 1 &&-} headtypename == "GHC.MVar.MVar"
     if not successful then
-        error "Error: did not select an MVar variable."
+        error $ "Error: did not select an MVar variable. Selected " ++ headtypename ++ "."
     else do
 --- === /typechecking ===
 

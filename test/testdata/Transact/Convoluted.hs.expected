@@ -8,8 +8,8 @@ swapMVars :: TMVar a -> TMVar a -> IO ()
 swapMVars x y = do
     a <- atomically (takeTMVar x)
     b <- atomically (takeTMVar y)
-    atomically (putMVar x b)
-    atomically (putMVar y a)
+    atomically (putTMVar x b)
+    atomically (putTMVar y a)
 
 
 

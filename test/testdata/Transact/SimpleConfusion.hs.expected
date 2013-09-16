@@ -6,7 +6,7 @@ import Control.Concurrent.STM
 main :: IO ()
 main = do
     v1 <- newEmptyMVar
-    v2 <- newEmptyMVarIO
+    v2 <- newEmptyTMVarIO
 
     -- ...
 
