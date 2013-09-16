@@ -48,8 +48,11 @@ spec = do
      (show res) `shouldBe` "Just \"The selected identifier is not a function/simple pattern name, or is not defined in this module \""
     -}
 
+    -- ---------------------------------
+
     it "lifts a definition to the top level" $ do
      doLiftToTopLevel ["./test/testdata/MoveDef/Md1.hs","24","5"]
+     -- liftToTopLevel logTestSettings Nothing "./test/testdata/MoveDef/Md1.hs" (24,5)
      diff <- compareFiles "./test/testdata/MoveDef/Md1.hs.expected"
                           "./test/testdata/MoveDef/Md1.hs.refactored"
      diff `shouldBe` []
@@ -127,47 +130,90 @@ spec = do
     -- ---------------------------------
 
     it "liftToTopLevel WhereIn7 12 14" $ do
-      pending
+     liftToTopLevel defaultTestSettings Nothing "./test/testdata/LiftToToplevel/WhereIn7.hs" (12,14)
+     -- liftToTopLevel logTestSettings     Nothing "./test/testdata/LiftToToplevel/WhereIn7.hs" (12,14)
+     diff <- compareFiles "./test/testdata/LiftToToplevel/WhereIn7.hs.expected"
+                          "./test/testdata/LiftToToplevel/WhereIn7.hs.refactored"
+     diff `shouldBe` []
 
     -- ---------------------------------
 
     it "liftToTopLevel LetIn1 11 22" $ do
-      pending
+     liftToTopLevel defaultTestSettings Nothing "./test/testdata/LiftToToplevel/LetIn1.hs" (11,22)
+     -- liftToTopLevel logTestSettings     Nothing "./test/testdata/LiftToToplevel/LetIn1.hs" (11,22)
+     diff <- compareFiles "./test/testdata/LiftToToplevel/LetIn1.hs.expected"
+                          "./test/testdata/LiftToToplevel/LetIn1.hs.refactored"
+     diff `shouldBe` []
+
 
     -- ---------------------------------
 
     it "liftToTopLevel LetIn2 10 22" $ do
-      pending
+     liftToTopLevel defaultTestSettings Nothing "./test/testdata/LiftToToplevel/LetIn2.hs" (10,22)
+     -- liftToTopLevel logTestSettings     Nothing "./test/testdata/LiftToToplevel/LetIn2.hs" (10,22)
+     diff <- compareFiles "./test/testdata/LiftToToplevel/LetIn2.hs.expected"
+                          "./test/testdata/LiftToToplevel/LetIn2.hs.refactored"
+     diff `shouldBe` []
+
 
     -- ---------------------------------
 
     it "liftToTopLevel LetIn3 10 27" $ do
-      pending
+     liftToTopLevel defaultTestSettings Nothing "./test/testdata/LiftToToplevel/LetIn3.hs" (10,27)
+     -- liftToTopLevel logTestSettings     Nothing "./test/testdata/LiftToToplevel/LetIn3.hs" (10,27)
+     diff <- compareFiles "./test/testdata/LiftToToplevel/LetIn3.hs.expected"
+                          "./test/testdata/LiftToToplevel/LetIn3.hs.refactored"
+     diff `shouldBe` []
 
     -- ---------------------------------
 
     it "liftToTopLevel PatBindIn1 18 7" $ do
-      pending
+     liftToTopLevel defaultTestSettings Nothing "./test/testdata/LiftToToplevel/PatBindIn1.hs" (18,7)
+     -- liftToTopLevel logTestSettings     Nothing "./test/testdata/LiftToToplevel/PatBindIn1.hs" (18,7)
+     diff <- compareFiles "./test/testdata/LiftToToplevel/PatBindIn1.hs.expected"
+                          "./test/testdata/LiftToToplevel/PatBindIn1.hs.refactored"
+     diff `shouldBe` []
 
     -- ---------------------------------
 
-    it "liftToTopLevel PatBindIn3 11 `15" $ do
-      pending
+    it "liftToTopLevel PatBindIn3 11 15" $ do
+     liftToTopLevel defaultTestSettings Nothing "./test/testdata/LiftToToplevel/PatBindIn3.hs" (11,15)
+     -- liftToTopLevel logTestSettings     Nothing "./test/testdata/LiftToToplevel/PatBindIn3.hs" (11,15)
+     diff <- compareFiles "./test/testdata/LiftToToplevel/PatBindIn3.hs.expected"
+                          "./test/testdata/LiftToToplevel/PatBindIn3.hs.refactored"
+     diff `shouldBe` []
+
 
     -- ---------------------------------
 
     it "liftToTopLevel CaseIn1 10 28" $ do
-      pending
+     liftToTopLevel defaultTestSettings Nothing "./test/testdata/LiftToToplevel/CaseIn1.hs" (10,28)
+     -- liftToTopLevel logTestSettings     Nothing "./test/testdata/LiftToToplevel/CaseIn1.hs" (10,28)
+     diff <- compareFiles "./test/testdata/LiftToToplevel/CaseIn1.hs.expected"
+                          "./test/testdata/LiftToToplevel/CaseIn1.hs.refactored"
+     diff `shouldBe` []
+
 
     -- ---------------------------------
 
     it "liftToTopLevel PatBindIn2 17 7 fails" $ do
-      pending
+{-
+     res <- catchException (doLiftToTopLevel ["./test/testdata/LiftToToplevel/PatBindIn2.hs","17","7"])
+     -- liftToTopLevel logTestSettings     Nothing "./test/testdata/LiftToToplevel/PatBindIn2.hs" (17,7)
+
+     (show res) `shouldBe` "Just \"\\nThe identifier is not a local function/pattern name!\""
+-}
+     pending -- Not clear that this was covered in the original, will
+             -- come back to it
 
     -- ---------------------------------
 
     it "liftToTopLevel WhereIn2 11 18 fails" $ do
-      pending
+     res <- catchException (doLiftToTopLevel ["./test/testdata/LiftToToplevel/WhereIn2.hs","11","18"])
+     -- liftToTopLevel logTestSettings     Nothing "./test/testdata/LiftToToplevel/WhereIn2.hs" (11,18)
+
+     (show res) `shouldBe` "Just \"The identifier(s): (sq, test/testdata/LiftToToplevel/WhereIn2.hs:11:18) will cause name clash/capture or ambiguity occurrence problem after lifting, please do renaming first!\""
+
 
 
 {- original tests

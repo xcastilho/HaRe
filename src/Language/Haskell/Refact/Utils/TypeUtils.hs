@@ -3107,35 +3107,30 @@ addFormalParams place newParams
            _ <- putToksAfterSpan l PlaceAdjacent toks
            return ()
 
-{-
--- | Add tokens corresponding to the new parameters to the end of the
--- syntax element provided
-addFormalParams :: (SYB.Data t, SYB.Typeable t) =>
-                t -> [GHC.Located (GHC.Pat GHC.Name)] -> RefactGhc ()
-addFormalParams t newParams
-  = do
-       let (startPos,endPos) = getStartEndLoc t
-       newToks <- liftIO $ basicTokenise (prettyprintPatList prettyprint True newParams)
-       _ <- putToksAfterPos (startPos,endPos) PlaceAdjacent $ map markToken newToks
-       return ()
--}
+-- ---------------------------------------------------------------------
 
 addActualParamsToRhs :: (SYB.Typeable t, SYB.Data t) =>
                         Bool -> GHC.Name -> [GHC.Name] -> t -> RefactGhc t
 addActualParamsToRhs modifyToks pn paramPNames rhs = do
-    logm $ "addActualParamsToRhs:rhs=" ++ (SYB.showData SYB.Renamer 0 $ rhs)
-    r <- everywhereMStaged SYB.Renamer (SYB.mkM worker) rhs
+    -- logm $ "addActualParamsToRhs:rhs=" ++ (SYB.showData SYB.Renamer 0 $ rhs)
+    r <- everywhereMStaged SYB.Renamer (SYB.mkM grhs) rhs
     return r
     -- = applyTP (stop_tdTP (failTP `adhocTP` worker))
      where
+
+       -- |Limit the action to actual RHS elements
+       grhs :: (GHC.GRHSs GHC.Name) -> RefactGhc (GHC.GRHSs GHC.Name)
+       grhs (GHC.GRHSs g lb) = do
+         g' <- everywhereMStaged SYB.Renamer (SYB.mkM worker) g
+         return (GHC.GRHSs g' lb)
+
        worker :: (GHC.Located (GHC.HsExpr GHC.Name)) -> RefactGhc (GHC.Located (GHC.HsExpr GHC.Name))
-       worker oldExp@(GHC.L l1 (GHC.HsApp (GHC.L l2 (GHC.HsVar pname)) e2))
+       worker oldExp@(GHC.L l2 (GHC.HsVar pname))
         | pname == pn = do
-              -- let newExp = (GHC.L l1 (GHC.HsApp (GHC.L l2 (GHC.HsVar pname)) (foldl addParamToExp e2 paramPNames)))
-              let newExp = foldl myAddParam oldExp paramPNames
-              logm $ "addActualParamsToRhs:newExp=" ++ (SYB.showData SYB.Renamer 0 $ newExp)
-              logm $ "addActualParamsToRhs:(prettyprint newExp)=[" ++ (prettyprint newExp) ++ "]"
-              -- if modifyToks then do _ <- updateToks e2 newExp prettyprint False
+              let newExp' = foldl addParamToExp oldExp paramPNames
+              let newExp  = (GHC.L l2 (GHC.HsPar newExp'))
+              -- TODO: updateToks must add a space at the end of the
+              --       new exp
               if modifyToks then do _ <- updateToks oldExp newExp prettyprint False
                                     return newExp
                             else return newExp
@@ -3144,17 +3139,6 @@ addActualParamsToRhs modifyToks pn paramPNames rhs = do
        addParamToExp :: (GHC.LHsExpr GHC.Name) -> GHC.Name -> (GHC.LHsExpr GHC.Name)
        addParamToExp  expr param = GHC.noLoc (GHC.HsApp expr (GHC.noLoc (GHC.HsVar param)))
 
-       myAddParam (GHC.L l1 (GHC.HsApp e1 e2)) n = (GHC.L l1 (GHC.HsApp e1' e2))
-         where
-           e1' = (GHC.noLoc
-                   (GHC.HsPar
-                    (GHC.noLoc
-                     (GHC.HsApp e1
-                               (GHC.noLoc (GHC.HsVar n))
-                     )
-                    )
-                  )
-                )
 
 {-
 Required end result : (sq pow) x + sumSquares xs
@@ -3236,82 +3220,6 @@ Original : sq x + sumSquares xs
 -}
 
 
-
-{-
-zz ab = 1 + toplevel ab
-
-       (L {test/testdata/DupDef/Dd1.hs:34:1-23}
-        (FunBind
-         (L {test/testdata/DupDef/Dd1.hs:34:1-2} {Name: DupDef.Dd1.zz})
-         (False)
-         (MatchGroup
-          [
-           (L {test/testdata/DupDef/Dd1.hs:34:1-23}
-            (Match
-             [
-              (L {test/testdata/DupDef/Dd1.hs:34:4-5}
-               (VarPat {Name: ab}))]
-             (Nothing)
-             (GRHSs
-              [
-               (L {test/testdata/DupDef/Dd1.hs:34:9-23}
-                (GRHS
-                 []
-                 (L {test/testdata/DupDef/Dd1.hs:34:9-23}
-                  (OpApp
-                   (L {test/testdata/DupDef/Dd1.hs:34:9}
-                    (HsOverLit
-                     (OverLit
-                      (HsIntegral
-                       (1))
-                      (False)
-                      (HsVar {Name: GHC.Num.fromInteger}) {!type placeholder here?!})))
-                   (L {test/testdata/DupDef/Dd1.hs:34:11}
-                    (HsVar {Name: GHC.Num.+})) {!fixity placeholder here?!}
-                   (L {test/testdata/DupDef/Dd1.hs:34:13-23}
-                    (HsApp
-                     (L {test/testdata/DupDef/Dd1.hs:34:13-20}
-                      (HsVar {Name: DupDef.Dd1.toplevel}))
-                     (L {test/testdata/DupDef/Dd1.hs:34:22-23}
-                      (HsVar {Name: ab}))))))))]
-              (EmptyLocalBinds))))] {!type placeholder here?!})
-         (WpHole) {!NameSet placeholder here!}
-         (Nothing)))
-
-----------
-
-zz ab = toplevel ab
-
-       (L {test/testdata/DupDef/Dd1.hs:34:1-19}
-        (FunBind
-         (L {test/testdata/DupDef/Dd1.hs:34:1-2} {Name: DupDef.Dd1.zz})
-         (False)
-         (MatchGroup
-          [
-           (L {test/testdata/DupDef/Dd1.hs:34:1-19}
-            (Match
-             [
-              (L {test/testdata/DupDef/Dd1.hs:34:4-5}
-               (VarPat {Name: ab}))]
-             (Nothing)
-             (GRHSs
-              [
-               (L {test/testdata/DupDef/Dd1.hs:34:9-19}
-                (GRHS
-                 []
-                 (L {test/testdata/DupDef/Dd1.hs:34:9-19}
-                  (HsApp
-                   (L {test/testdata/DupDef/Dd1.hs:34:9-16}
-                    (HsVar {Name: DupDef.Dd1.toplevel}))
-                   (L {test/testdata/DupDef/Dd1.hs:34:18-19}
-                    (HsVar {Name: ab}))))))]
-              (EmptyLocalBinds))))] {!type placeholder here?!})
-         (WpHole) {!NameSet placeholder here!}
-         (Nothing)))
-
--}
-
-
 {-
    addActualParamsToRhs pn paramPNames
     = applyTP (stop_tdTP (failTP `adhocTP` worker))
@@ -3326,70 +3234,6 @@ zz ab = toplevel ab
 
        addParamToExp  exp param=(TiDecorate.Exp (HsApp exp param))
 -}
-
-
-{- ++AZ++ original
-{-
-addParamsToDecls::(MonadPlus m)
-               => [HsDeclP]   -- ^ A declaration list where the function is defined and\/or used.
-                  ->PName     -- ^ The function name.
-                  ->[PName]   -- ^ The parameters to be added.
-                  ->Bool      -- ^ Modify the token stream or not.
-                  ->m [HsDeclP] -- ^ The result.
--}
-
-addParamsToDecls::(MonadPlus m, (MonadState (([PosToken], Bool), (Int,Int)) m))
-               => [HsDeclP]   -- ^ A declaration list where the function is defined and\/or used.
-                  ->PName     -- ^ The function name.
-                  ->[PName]   -- ^ The parameters to be added.
-                  ->Bool      -- ^ Modify the token stream or not.
-                  ->m [HsDeclP] -- ^ The result.
-
-addParamsToDecls decls pn paramPNames modifyToks
-   = if (paramPNames/=[])
-        then mapM addParamToDecl decls
-        else return decls
-  where
-   addParamToDecl (TiDecorate.Dec (HsFunBind loc matches@((HsMatch _ fun pats rhs ds):ms)))
-    | pNTtoPN fun == pn
-    = do matches'<-mapM addParamtoMatch matches
-         return (TiDecorate.Dec (HsFunBind loc matches'))
-      where
-       addParamtoMatch (HsMatch loc  fun  pats rhs  decls)
-        = do rhs'<-addActualParamsToRhs pn paramPNames rhs
-             let pats' = map pNtoPat paramPNames
-             pats'' <- if modifyToks then do (p, _)<-addFormalParams fun pats'
-                                             return p
-                                     else return pats'
-             return (HsMatch loc  fun  (pats'++pats)  rhs' decls)
-
-   addParamToDecl (TiDecorate.Dec (HsPatBind loc p rhs ds))
-     |patToPN p == pn
-       = do rhs'<-addActualParamsToRhs pn paramPNames rhs
-            let pats' = map pNtoPat paramPNames
-            pats'' <- if modifyToks  then do (p, _) <-addFormalParams p pats'
-                                             return p
-                                     else return pats'
-            return (TiDecorate.Dec (HsFunBind loc [HsMatch loc (patToPNT p) pats' rhs ds]))
-   addParamToDecl x=return x
-
-   addActualParamsToRhs pn paramPNames
-    = applyTP (stop_tdTP (failTP `adhocTP` worker))
-     where
-       worker exp@(TiDecorate.Exp (HsId (HsVar (PNT pname ty loc))))
-        | pname==pn
-         = do let newExp=TiDecorate.Exp (HsParen (foldl addParamToExp exp (map pNtoExp paramPNames)))
-              if modifyToks then do (newExp', _) <- updateToks exp newExp prettyprint
-                                    return newExp'
-                            else return newExp
-       worker x =mzero
-
-       addParamToExp  exp param=(TiDecorate.Exp (HsApp exp param))
-
-
-
--}
-
 
 
 
@@ -3590,7 +3434,10 @@ rmDecl:: (SYB.Data t)
 rmDecl pn incSig t = do
   logm $ "rmDecl:(pn,incSig)= " ++ (GHC.showPpr (pn,incSig)) -- ++AZ++
   setStateStorage StorageNone
-  t'  <- everywhereMStaged' SYB.Renamer (SYB.mkM inDecls `SYB.extM` inGRHSs) t -- top down
+  t2  <- everywhereMStaged' SYB.Renamer (SYB.mkM inLet) t -- top down
+  t'  <- everywhereMStaged' SYB.Renamer (SYB.mkM inDecls `SYB.extM` inGRHSs) t2 -- top down
+
+             -- applyTP (once_tdTP (failTP `adhocTP` inDecls)) t
   -- t'  <- everywhereMStaged SYB.Renamer (SYB.mkM inDecls) t
   (t'',sig') <- if incSig
                   then rmTypeSig pn t'
@@ -3607,6 +3454,7 @@ rmDecl pn incSig t = do
       = do
          let decls = hsBinds localDecls
          -- logm $ "rmDecl:inGRHSs decls=" ++ (SYB.showData SYB.Renamer 0 $ decls)
+         -- logm $ "rmDecl:inGRHSs localDecls=" ++ (SYB.showData SYB.Renamer 0 $ localDecls)
          let (_decls1, decls2) = break (defines pn) decls
              decl = ghead "rmDecl" decls2
          topLevel <- isTopLevelPN pn
@@ -3615,7 +3463,6 @@ rmDecl pn incSig t = do
                      False  -> rmLocalDecl decl decls
          return (GHC.GRHSs a (replaceBinds localDecls decls'))
     inGRHSs x = return x
-
 
     inDecls (decls::[GHC.LHsBind GHC.Name])
       | not $ emptyList (snd (break (defines pn) decls)) -- /=[]
@@ -3628,6 +3475,32 @@ rmDecl pn incSig t = do
                      False  -> rmLocalDecl decl decls
     inDecls x = return x
 
+    inLet :: GHC.LHsExpr GHC.Name -> RefactGhc (GHC.LHsExpr GHC.Name)
+    inLet (GHC.L ss (GHC.HsLet localDecls expr@(GHC.L l _)))
+      | not $ emptyList (snd (break (defines pn) (hsBinds localDecls)))
+      = do
+         -- putSrcSpan ss -- Make sure the tree includes a SrcSpan for
+                       -- the HsLet, for when it is replaced later
+
+         let decls = hsBinds localDecls
+         let (decls1, decls2) = break (defines pn) decls
+             decl = ghead "rmDecl" decls2
+
+         toks <- getToksForSpan l
+         removeToksForPos (getStartEndLoc decl)
+         decl' <- syncDeclToLatestStash decl
+         setStateStorage (StorageBind decl')
+         case length decls of
+           1 -> do
+            putToksForSpan ss toks
+            return expr
+           _ -> do
+             let decls2' = gtail "inLet" decls2
+             return $ (GHC.L ss (GHC.HsLet (replaceBinds localDecls (decls1 ++ decls2')) expr))
+
+    inLet x = return x
+
+
     rmTopLevelDecl :: GHC.LHsBind GHC.Name -> [GHC.LHsBind GHC.Name]
                 -> RefactGhc [GHC.LHsBind GHC.Name]
     rmTopLevelDecl decl decls
@@ -3639,7 +3512,7 @@ rmDecl pn incSig t = do
           setStateStorage (StorageBind decl')
 
           let (decls1, decls2) = break (defines pn) decls
-              decls2' = gtail "rmLocalDecl 1" decls2
+              decls2' = gtail "rmTopLevelDecl 1" decls2
           return $ (decls1 ++ decls2')
           -- return (decls \\ [decl])
 
@@ -3655,6 +3528,14 @@ rmDecl pn incSig t = do
                 -> RefactGhc [GHC.LHsBind GHC.Name]
     rmLocalDecl decl@(GHC.L sspan _) decls
      = do
+
+         -- TODO: The let/in version is wrapped in a GHC.HsLet expression.
+         -- The sspan of HsLet runs from the let keyword to the end of
+         -- the in clause.
+         -- (GHC.L l (HsLet (HsLocalBinds id) (LHsExpr id))
+         -- So we must remove the tokens from the start of l to the
+         -- start of the LHsExpr
+
          logm $ "rmLocalDecl: decls=" ++ (GHC.showPpr decls)
          prevToks <- getToksBeforeSpan sspan -- Need these before
                                              -- sspan is deleted
@@ -3680,8 +3561,9 @@ rmDecl pn incSig t = do
                  rmStartPos = tokenPos whereOrLet
 
              logm $ "rmLocalDecl: where/let tokens are at" ++ (show (rmStartPos,rmEndPos)) -- ++AZ++ 
-
              removeToksForPos (rmStartPos,rmEndPos)
+
+--isIn
              return ()
            _ -> return ()
 
@@ -3714,6 +3596,8 @@ rmTypeSig :: (SYB.Data t) =>
                      -- was one
 rmTypeSig pn t
   = do
+     -- logm $ "rmTypeSig:t="  ++ (SYB.showData SYB.Renamer 0 t)
+
      setStateStorage StorageNone
      t' <- everywhereMStaged SYB.Renamer (SYB.mkM inSigs) t
      storage <- getStateStorage
@@ -3769,6 +3653,34 @@ rmTypeSig pn t
                  setStateStorage (StorageSig sig')
                  return (decls1++tail decls2)
    inSigs x = return x
+
+{-
+               [
+                (L {test/testdata/LiftToToplevel/PatBindIn1.hs:15:7-14}
+                 (TypeSig
+                  [
+                   (L {test/testdata/LiftToToplevel/PatBindIn1.hs:15:7} {Name: h})] 
+                  (L {test/testdata/LiftToToplevel/PatBindIn1.hs:15:12-14}
+                   (HsTyVar {Name: GHC.Types.Int})))),
+                (L {test/testdata/LiftToToplevel/PatBindIn1.hs:16:7-14}
+                 (TypeSig
+                  [
+                   (L {test/testdata/LiftToToplevel/PatBindIn1.hs:16:7} {Name: t})] 
+                  (L {test/testdata/LiftToToplevel/PatBindIn1.hs:16:12-14}
+                   (HsTyVar {Name: GHC.Types.Int})))),
+                (L {test/testdata/LiftToToplevel/PatBindIn1.hs:17:7-22}
+                 (TypeSig
+                  [
+                   (L {test/testdata/LiftToToplevel/PatBindIn1.hs:17:7-9} {Name: tup})] 
+                  (L {test/testdata/LiftToToplevel/PatBindIn1.hs:17:14-22}
+                   (HsTupleTy
+                    (HsBoxedOrConstraintTuple)
+                    [
+                     (L {test/testdata/LiftToToplevel/PatBindIn1.hs:17:15-17}
+                      (HsTyVar {Name: GHC.Types.Int})),
+                     (L {test/testdata/LiftToToplevel/PatBindIn1.hs:17:19-21}
+                      (HsTyVar {Name: GHC.Types.Int}))]))))]
+-}
 
 -- ---------------------------------------------------------------------
 

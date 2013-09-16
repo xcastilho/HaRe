@@ -32,6 +32,9 @@ module Language.Haskell.Refact.Utils.MonadFunctions
        , removeToksForSpan
        , removeToksForPos
        , syncDeclToLatestStash
+
+       -- , putSrcSpan -- ^Make sure a SrcSpan is in the tree
+
        -- , putNewSpanAndToks
        -- , putNewPosAndToks
        -- * Managing token stash
@@ -88,7 +91,7 @@ fetchToksFinal = do
   Just tm <- gets rsModule
   let toks = retrieveTokensFinal $ (tkCache $ rsTokenCache tm) Map.! mainTid
   -- logm $ "fetchToks" ++ (showToks toks)
-  logm $ "fetchToksFinal (not showing toks"
+  logm $ "fetchToksFinal (not showing toks)"
   return toks
 
 -- |fetch the pristine token stream
@@ -166,11 +169,6 @@ putToksForPos pos toks = do
   let mainForest = (tkCache $ rsTokenCache tm) Map.! mainTid
   let sspan = posToSrcSpan mainForest pos
   let (tk',newSpan) = putToksInCache (rsTokenCache tm) sspan toks
-  {-
-  let forest = getTreeFromCache sspan (rsTokenCache tm)
-  let (forest',newSpan,oldTree) = updateTokensForSrcSpan forest sspan toks
-  let tk' = replaceTreeInCache sspan forest' $ rsTokenCache tm
-  -}
   let rsModule' = Just (tm {rsTokenCache = tk', rsStreamModified = True })
   put $ st { rsModule = rsModule' }
   -- stashName <- stash oldTree
@@ -180,7 +178,7 @@ putToksForPos pos toks = do
 -- |Add tokens after a designated GHC.SrcSpan
 putToksAfterSpan :: GHC.SrcSpan -> Positioning -> [PosToken] -> RefactGhc GHC.SrcSpan
 putToksAfterSpan oldSpan pos toks = do
-  logm $ "putToksAfterSpan " ++ (GHC.showPpr oldSpan) ++ ":" ++ (showSrcSpanF oldSpan)
+  logm $ "putToksAfterSpan " ++ (GHC.showPpr oldSpan) ++ ":" ++ (showSrcSpanF oldSpan) ++ " at " ++ (show pos) ++ ":" ++ (showToks toks)
   st <- get
   let Just tm = rsModule st
   let forest = getTreeFromCache oldSpan (rsTokenCache tm)
@@ -209,7 +207,6 @@ putToksAfterPos pos position toks = do
 -- |Add tokens after a designated GHC.SrcSpan, and update the AST
 -- fragment to reflect it
 putDeclToksAfterSpan :: (SYB.Data t) => GHC.SrcSpan -> GHC.Located t -> Positioning -> [PosToken] -> RefactGhc (GHC.Located t)
--- putDeclToksAfterSpan :: (SYB.Data t) => GHC.SrcSpan -> GHC.Located t -> Positioning -> [PosToken] -> RefactGhc t
 putDeclToksAfterSpan oldSpan t pos toks = do
   logm $ "putDeclToksAfterSpan " ++ (GHC.showPpr oldSpan) ++ ":" ++ (show (showSrcSpanF oldSpan,pos,toks))
   st <- get
@@ -228,11 +225,6 @@ removeToksForSpan sspan = do
   st <- get
   let Just tm = rsModule st
   let tk' = removeToksFromCache (rsTokenCache tm) sspan
-  {-
-  let forest = getTreeFromCache sspan (rsTokenCache tm)
-  let (forest',oldTree) = removeSrcSpan forest (srcSpanToForestSpan sspan)
-  let tk' = replaceTreeInCache sspan forest' $ rsTokenCache tm
-  -}
   let rsModule' = Just (tm {rsTokenCache = tk', rsStreamModified = True})
   put $ st { rsModule = rsModule' }
   -- stashName <- stash oldTree -- Create a new entry for the old tree
@@ -247,16 +239,25 @@ removeToksForPos pos = do
   let mainForest = (tkCache $ rsTokenCache tm) Map.! mainTid
   let sspan = posToSrcSpan mainForest pos
   let tk' = removeToksFromCache (rsTokenCache tm) sspan
-  {-
-  let forest = getTreeFromCache sspan (rsTokenCache tm)
-  let (forest',delTree) = removeSrcSpan forest (srcSpanToForestSpan sspan)
-  let tk' = replaceTreeInCache sspan forest' $ rsTokenCache tm
-  -}
   let rsModule' = Just (tm {rsTokenCache = tk', rsStreamModified = True})
   put $ st { rsModule = rsModule' }
-  -- stashName <- stash delTree
   drawTokenTree "removeToksForPos result"
   return ()
+
+{-
+-- |Insert a GHC.SrcSpan into the tree if it is not already there
+putSrcSpan ::  GHC.SrcSpan -> RefactGhc ()
+putSrcSpan sspan = do
+  logm $ "putSrcSpan " ++ (GHC.showPpr sspan) ++ ":" ++ (showSrcSpanF sspan) 
+  st <- get
+  let Just tm = rsModule st
+  let forest = getTreeFromCache sspan (rsTokenCache tm)
+  let forest' = insertSrcSpan forest (srcSpanToForestSpan sspan)
+  let tk' = replaceTreeInCache sspan forest' $ rsTokenCache tm
+  let rsModule' = Just (tm {rsTokenCache = tk', rsStreamModified = True})
+  put $ st { rsModule = rsModule' }
+  return ()
+-}
 
 -- ---------------------------------------------------------------------
 

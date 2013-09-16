@@ -206,7 +206,7 @@ spec = do
            "`- ((25,1),(32,18))\n"
 
     -- ---------------------------------
-    
+
     it "gets the tokens after adding and renaming" $ do
       (t,toks) <- parsedFileDupDefDd1
       let renamed = fromJust $ GHC.tm_renamed_source t
@@ -388,6 +388,7 @@ spec = do
             "   +- ((8,6),(8,8))\n   |\n"++
             "   +- ((1000008,9),(1000008,12))\n   |\n"++
             "   `- ((8,9),(13,25))\n"
+      (invariant tm3) `shouldBe` []
 
       -- The test ....
       -- getToksForSpan test/testdata/LiftToToplevel/D1.hs:8:6-19:("(((False,0,0,8),6),((False,0,0,8),20))",
@@ -402,8 +403,21 @@ spec = do
             "+- ((10000000006,24),(10000000006,34))\n|\n"++
             "`- ((6,26),(13,25))\n   |\n"++
             "   +- ((6,26),(7,8))\n   |\n"++
+            "   +- ((8,6),(8,20))\n   |  |\n"++
+            "   |  +- ((8,6),(8,20))\n   |  |\n"++
+            "   |  +- ((1000008,9),(1000008,12))\n   |  |\n"++
+            "   |  `- ((8,9),(8,20))\n   |\n"++
+            "   `- ((9,6),(13,25))\n"
+
+{-
+            "((1,1),(13,25))\n|\n"++
+            "+- ((1,1),(6,23))\n|\n"++
+            "+- ((10000000006,24),(10000000006,34))\n|\n"++
+            "`- ((6,26),(13,25))\n   |\n"++
+            "   +- ((6,26),(7,8))\n   |\n"++
             "   +- ((8,6),(8,20))\n   |\n"++
             "   `- ((9,6),(13,25))\n"
+-}
 
 {-
 tree TId 0:
@@ -424,6 +438,137 @@ tree TId 0:
 
 
       (showToks toks4) `shouldBe` "[(((8,6),(8,6)),ITvocurly,\"\"),(((8,6),(8,8)),ITvarid \"sq\",\"sq\"),(((8,9),(8,12)),ITvarid \"pow\",\"pow\"),(((8,9),(8,10)),ITvarid \"x\",\"x\"),(((8,11),(8,12)),ITequal,\"=\"),(((8,13),(8,14)),ITvarid \"x\",\"x\"),(((8,15),(8,16)),ITvarsym \"^\",\"^\"),(((8,17),(8,20)),ITvarid \"pow\",\"pow\")]"
+
+    -- ---------------------------------
+
+    it "gets the tokens after updating a SrcSpan" $ do
+      (t,toks) <- parsedFileLiftLetIn1Ghc
+      let renamed = fromJust $ GHC.tm_renamed_source t
+      let decls = hsBinds renamed
+      let forest = mkTreeFromTokens toks
+
+      -- putToksForSpan test/testdata/LiftToToplevel/LetIn1.hs:12:22-23:(((False,0,0,12),22),((False,0,0,12),24))
+      -- [((((0,1),(0,2)),IToparen),"("),((((0,2),(0,4)),ITvarid "sq"),"sq"),((((0,5),(0,8)),ITvarid "pow"),"pow"),((((0,8),(0,9)),ITcparen),")")]
+
+      let sspan1 = posToSrcSpan forest $
+                        (((forestLineToGhcLine $ ForestLine False 0 0 12),22),
+                         ((forestLineToGhcLine $ ForestLine False 0 0 12),24) )
+      newToks <- liftIO $ basicTokenise "(sq pow)"
+      (show newToks) `shouldBe` "[((((0,1),(0,2)),IToparen),\"(\"),((((0,2),(0,4)),ITvarid \"sq\"),\"sq\"),((((0,5),(0,8)),ITvarid \"pow\"),\"pow\"),((((0,8),(0,9)),ITcparen),\")\")]"
+
+      let (tm2,sspan2,tree2) = updateTokensForSrcSpan forest sspan1 newToks
+      (drawTreeEntry tm2) `shouldBe`
+            "((1,1),(16,22))\n|\n"++
+            "+- ((1,1),(12,21))\n|\n"++
+            "+- ((10000000012,22),(10000000012,30))\n|\n"++
+            "`- ((12,25),(16,22))\n"
+
+      -- putToksForSpan test/testdata/LiftToToplevel/LetIn1.hs:12:29-30:(((False,0,0,12),29),((False,0,0,12),31))
+      -- [((((0,1),(0,2)),IToparen),"("),((((0,2),(0,4)),ITvarid "sq"),"sq"),((((0,5),(0,8)),ITvarid "pow"),"pow"),((((0,8),(0,9)),ITcparen),")")]
+
+      let sspan2 = posToSrcSpan forest $
+                        (((forestLineToGhcLine $ ForestLine False 0 0 12),29),
+                         ((forestLineToGhcLine $ ForestLine False 0 0 12),31) )
+      newToks2 <- liftIO $ basicTokenise "(sq pow)"
+      (show newToks2) `shouldBe` "[((((0,1),(0,2)),IToparen),\"(\"),((((0,2),(0,4)),ITvarid \"sq\"),\"sq\"),((((0,5),(0,8)),ITvarid \"pow\"),\"pow\"),((((0,8),(0,9)),ITcparen),\")\")]"
+
+      let (tm3,sspan3,tree3) = updateTokensForSrcSpan tm2 sspan2 newToks2
+      (drawTreeEntry tm3) `shouldBe`
+            "((1,1),(16,22))\n|\n"++
+            "+- ((1,1),(12,21))\n|\n"++
+            "+- ((10000000012,22),(10000000012,30))\n|\n"++
+            "`- ((12,25),(16,22))\n   |\n"++
+            "   +- ((12,25),(12,28))\n   |\n"++
+            "   +- ((10000000012,29),(10000000012,37))\n   |\n"++
+            "   `- ((12,32),(16,22))\n"
+
+
+      -- The test ....
+      -- getToksForSpan test/testdata/LiftToToplevel/LetIn1.hs:12:22-32:("(((False,0,0,12),22),((False,0,0,12),33))"
+      let sspan4 = posToSrcSpan forest $
+                        (((forestLineToGhcLine $ ForestLine False 0 0 12),22),
+                         ((forestLineToGhcLine $ ForestLine False 0 0 12),33) )
+      --
+
+      let f1 = insertSrcSpan tm3 (srcSpanToForestSpan sspan4)
+      -- (show f1) `shouldBe` ""
+      (drawTreeEntry f1) `shouldBe`
+            "((1,1),(16,22))\n|\n"++
+            "+- ((1,1),(12,21))\n|\n"++
+            "+- ((12,22),(12,33))\n|  |\n"++
+            "|  +- ((10000000012,22),(10000000012,33))\n|  |\n"++
+            "|  +- ((12,25),(12,28))\n|  |\n"++
+            "|  +- ((10000000012,29),(10000000012,37))\n|  |\n"++
+            "|  `- ((12,32),(12,33))\n|\n"++
+            "`- ((13,24),(16,22))\n"
+
+      let ss1 = posToSrcSpan forest $
+                        (((forestLineToGhcLine $ ForestLine False 0 0  1), 1),
+                         ((forestLineToGhcLine $ ForestLine False 0 0 12),21) )
+      let ss2 = posToSrcSpan forest $
+                        (((forestLineToGhcLine $ ForestLine True  0 0 12),22),
+                         ((forestLineToGhcLine $ ForestLine True  0 0 12),30) )
+      let ss3 = posToSrcSpan forest $
+                        (((forestLineToGhcLine $ ForestLine False 0 0 12),25),
+                         ((forestLineToGhcLine $ ForestLine False 0 0 16),22) )
+
+
+      (show $ containsEnd (((ForestLine True 0 0 12),22),((ForestLine True 0 0 12),30)) (srcSpanToForestSpan sspan4)) `shouldBe` "False"
+      (show $ containsMiddle (((ForestLine True 0 0 12),22),((ForestLine True 0 0 12),30)) (srcSpanToForestSpan sspan4)) `shouldBe` "True"
+
+      (show $ containsEnd (((ForestLine False 0 0 12),25),((ForestLine False 0 0 16),22)) (srcSpanToForestSpan sspan4)) `shouldBe` "True"
+      (show $ containsMiddle (((ForestLine False 0 0 12),25),((ForestLine False 0 0 16),22)) (srcSpanToForestSpan sspan4)) `shouldBe` "False"
+
+      (show $ containsMiddle (((ForestLine False 0 0 12),25),((ForestLine False 0 0 12),28)) (srcSpanToForestSpan sspan4)) `shouldBe` "True"
+
+      (show $ containsMiddle (((ForestLine True 0 0 12),29),((ForestLine True 0 0 12),37)) (srcSpanToForestSpan sspan4)) `shouldBe` "False"
+      (show $ containsEnd    (((ForestLine True 0 0 12),29),((ForestLine True 0 0 12),37)) (srcSpanToForestSpan sspan4)) `shouldBe` "True"
+
+
+      (show $ containsMiddle (((ForestLine False 0 0 12),32),((ForestLine False 0 0 16),22)) (srcSpanToForestSpan sspan4)) `shouldBe` "False"
+
+      let (b1,m1@[m1a,m1b],e1) = splitSubtree tm3 (srcSpanToForestSpan sspan4)
+      -- (show (b1,m1,e1)) `shouldBe` "([],[],[])"
+
+      let (b2,m2,e2) = splitSubtree m1b (srcSpanToForestSpan sspan4)
+      -- (show (b2,m2,e2)) `shouldBe` "([],[],[])"
+
+
+      -- let (f2,t2) = getSrcSpanFor tm3 (srcSpanToForestSpan sspan4)
+
+      -- (show t2) `shouldBe` ""
+      --
+      {-
+      (show tm3) `shouldBe` ""
+      Node {rootLabel = Entry (((ForestLine False 0 0 12),32),((ForestLine False 0 0 16),22)) 
+        [((((12,32),(12,33)),ITvarid \"y\"),\"y\"),
+         ((((13,24),(13,29)),ITwhere),\"where\"),
+      -}
+      let ss2f@(ss2fs,ss2fe)        = srcSpanToForestSpan ss2
+      let sspan4f@(sspan4s,sspan4e) = srcSpanToForestSpan sspan4
+      (show (ss2f,sspan4f)) `shouldBe` "((((ForestLine True 0 0 12),22),((ForestLine True 0 0 12),30)),"++
+                                       "(((ForestLine False 0 0 12),22),((ForestLine False 0 0 12),33)))"
+      -- (ss2fe >= sspan4s,ss2fe <= sspan4e) `shouldBe` (True,False)
+      (containsStart ss2f sspan4f,containsEnd ss2f sspan4f) `shouldBe` (True,False)
+
+      let (tm5,toks5) = getTokensFor tm3 sspan4
+
+      -- (showTree tm3) `shouldBe` ""
+
+      (GHC.showRichTokenStream toks5) `shouldBe`
+         "\n\n\n\n\n\n\n\n\n\n\n                      (sq pow)x + (sq pow)y"
+      -- (showToks toks5) `shouldBe` ""
+
+      (drawTreeEntry tm5) `shouldBe`
+            "((1,1),(16,22))\n|\n"++
+            "+- ((1,1),(12,21))\n|\n"++
+            "+- ((12,22),(12,33))\n|  |\n"++
+            "|  +- ((10000000012,22),(10000000012,33))\n|  |\n"++
+            "|  +- ((12,25),(12,28))\n|  |\n"++
+            "|  +- ((10000000012,29),(10000000012,37))\n|  |\n"++
+            "|  `- ((12,32),(12,33))\n|\n"++
+            "`- ((13,24),(16,22))\n"
+
 
   -- ---------------------------------------------
 
@@ -690,16 +835,21 @@ tree TId 0:
               "+- ((1,1),(15,17))\n|\n"++
               "`- ((19,1),(21,14))\n" -- our inserted span
 
-      let l' = posToSrcSpan forest' ((13,1),(21,14))
-      (GHC.showPpr l') `shouldBe` "test/testdata/TokenTest.hs:(13,1)-(21,13)"
-      (showSrcSpan l') `shouldBe` "((13,1),(21,14))"
+      let l' = posToSrcSpan forest' ((8,1),(10,10))
+      (GHC.showPpr l') `shouldBe` "test/testdata/TokenTest.hs:(8,1)-(10,9)"
+      (showSrcSpan l') `shouldBe` "((8,1),(10,10))"
 
       let forest'' = insertSrcSpan forest' (fs l')
       (invariant forest'') `shouldBe` []
       (drawTreeEntry forest'') `shouldBe`
               "((1,1),(21,14))\n|\n"++
-              "+- ((1,1),(10,10))\n|\n"++
-              "`- ((13,1),(21,14))\n" -- our inserted span
+              "+- ((1,1),(15,17))\n|  |\n"++
+              "|  +- ((1,1),(6,14))\n|  |\n"++
+              "|  +- ((8,1),(10,10))\n|  |\n"++ -- our inserted span
+              "|  `- ((13,1),(15,17))\n|\n"++
+              "`- ((19,1),(21,14))\n"
+
+    ------------------------------------
 
     it "does not delete existing versioned spans" $ do
       (_t,toks) <- parsedFileDemoteD1
@@ -770,6 +920,354 @@ tree TId 0:
                "   +- ((7,1),(7,18))\n   |\n"++
                "   +- ((9,1),(9,14))\n   |\n"++
                "   `- ((11,1),(13,25))\n"
+
+    ------------------------------------
+
+    it "insert a span after deleting one" $ do
+      (_t,toks) <- parsedFileLiftLetIn1Ghc
+      let forest = mkTreeFromTokens toks
+
+      -- getToksForSpan test/testdata/LiftToToplevel/LetIn1.hs:12:22-32
+
+      let sspan = posToSrcSpan forest ((12,22),(12,33))
+      (GHC.showPpr sspan) `shouldBe` "test/testdata/LiftToToplevel/LetIn1.hs:12:22-32"
+      (showSrcSpan sspan) `shouldBe` "((12,22),(12,33))"
+
+      -- let forest1 = insertSrcSpan forest (fs sspan)
+      let (forest1,declToks) = getTokensFor forest sspan
+
+      -- removeToksForPos ((10,22),(11,32))
+      let sspan2 = posToSrcSpan forest ((10,22),(11,32))
+      let (f2,_t2) = removeSrcSpan forest1 (srcSpanToForestSpan sspan2)
+
+      (invariant f2) `shouldBe` []
+      (drawTreeEntry f2) `shouldBe`
+               "((1,1),(16,22))\n|\n"++
+               "+- ((1,1),(12,21))\n|  |\n"++
+               "|  +- ((1,1),(10,21))\n|  |\n"++
+               "|  `- ((12,19),(12,21))\n|\n"++
+               "+- ((12,22),(12,33))\n|\n"++
+               "`- ((13,24),(16,22))\n"
+
+      -- Context in place, time for test
+
+
+
+
+      -- putToksForSpan test/testdata/LiftToToplevel/LetIn1.hs:(10,18)-(12,32):
+      (show declToks) `shouldBe` "[((((12,22),(12,24)),ITvarid \"sq\"),\"sq\"),((((12,25),(12,26)),ITvarid \"x\"),\"x\"),((((12,27),(12,28)),ITvarsym \"+\"),\"+\"),((((12,29),(12,31)),ITvarid \"sq\"),\"sq\"),((((12,32),(12,33)),ITvarid \"y\"),\"y\")]"
+
+
+      -- putToksForSpan test/testdata/LiftToToplevel/LetIn1.hs:(10,18)-(12,32)
+      let sspan3 = posToSrcSpan forest ((10,18),(12,33))
+
+--
+      let (b1,m1,e1) = splitSubtree f2 (srcSpanToForestSpan sspan3)
+      -- (show (b1,m1,e1)) `shouldBe` "([],[],[])"
+
+--
+
+
+      let (f3,_newSpan3,_tree3) = updateTokensForSrcSpan f2 sspan3 declToks
+
+      (invariant f3) `shouldBe` []
+      (drawTreeEntry f3) `shouldBe`
+               "((1,1),(16,22))\n|\n"++
+              "+- ((1,1),(10,17))\n|\n"++
+              "+- ((10000000010,18),(10000000010,29))\n|\n"++
+              "`- ((13,24),(16,22))\n"
+
+    ------------------------------------
+
+    it "Manipulates the Token Tree without breaking the invariant" $ do
+      (_t,toks) <- parsedFileLiftLetIn1Ghc
+      let forest = mkTreeFromTokens toks
+
+
+      -- putToksForSpan test/testdata/LiftToToplevel/LetIn1.hs:12:22-23:(((False,0,0,12),22),((False,0,0,12),24))
+      newToks1 <- liftIO $ basicTokenise "(sq pow)"
+      (show newToks1) `shouldBe` "[((((0,1),(0,2)),IToparen),\"(\"),((((0,2),(0,4)),ITvarid \"sq\"),\"sq\"),((((0,5),(0,8)),ITvarid \"pow\"),\"pow\"),((((0,8),(0,9)),ITcparen),\")\")]"
+
+      let sspan1 = posToSrcSpan forest ((12,22),(12,24))
+
+      let (f2,_newSpan2,_tree2) = updateTokensForSrcSpan forest sspan1 newToks1
+
+      (invariant f2) `shouldBe` []
+      (drawTreeEntry f2) `shouldBe`
+               "((1,1),(16,22))\n|\n"++
+               "+- ((1,1),(12,21))\n|\n"++
+               "+- ((10000000012,22),(10000000012,30))\n|\n"++
+               "`- ((12,25),(16,22))\n"
+
+
+      -- putToksForSpan test/testdata/LiftToToplevel/LetIn1.hs:12:29-30:(((False,0,0,12),29),((False,0,0,12),31))
+      (show newToks1) `shouldBe` "[((((0,1),(0,2)),IToparen),\"(\"),((((0,2),(0,4)),ITvarid \"sq\"),\"sq\"),((((0,5),(0,8)),ITvarid \"pow\"),\"pow\"),((((0,8),(0,9)),ITcparen),\")\")]"
+
+      let sspan2 = posToSrcSpan forest ((12,29),(12,31))
+
+      let (f3,_newSpan3,_tree3) = updateTokensForSrcSpan f2 sspan2 newToks1
+
+      (invariant f3) `shouldBe` []
+      (drawTreeEntry f3) `shouldBe`
+               "((1,1),(16,22))\n|\n"++
+               "+- ((1,1),(12,21))\n|\n"++
+               "+- ((10000000012,22),(10000000012,30))\n|\n"++
+               "`- ((12,25),(16,22))\n   |\n"++
+               "   +- ((12,25),(12,28))\n   |\n"++
+               "   +- ((10000000012,29),(10000000012,37))\n   |\n"++
+               "   `- ((12,32),(16,22))\n"
+
+
+      -- getToksForSpan test/testdata/LiftToToplevel/LetIn1.hs:10:25:("(((False,0,0,10),25),((False,0,0,10),26))",[((((10,25),(10,26)),ITinteger 0),"0")])
+      let sspan3 = posToSrcSpan forest ((10,25),(10,26))
+      let (f4,toks4) = getTokensFor f3 sspan3
+
+      (invariant f4) `shouldBe` []
+      (drawTreeEntry f4) `shouldBe`
+               "((1,1),(16,22))\n|\n"++
+               "+- ((1,1),(12,21))\n|  |\n"++
+               "|  +- ((1,1),(10,24))\n|  |\n"++
+               "|  +- ((10,25),(10,26))\n|  |\n"++
+               "|  `- ((10,26),(12,21))\n|\n"++
+               "+- ((10000000012,22),(10000000012,30))\n|\n"++
+               "`- ((12,25),(16,22))\n   |\n"++
+               "   +- ((12,25),(12,28))\n   |\n"++
+               "   +- ((10000000012,29),(10000000012,37))\n   |\n"++
+               "   `- ((12,32),(16,22))\n"
+
+
+      -- putToksForSpan test/testdata/LiftToToplevel/LetIn1.hs:10:25:(((False,0,0,10),25),((False,0,0,10),26))
+      newToks2 <- liftIO $ basicTokenise "pow" -- TODO: check that
+                                               -- using basicTokenise
+                                               -- here is ok
+      -- (show newToks2) `shouldBe` "[((((10,26),(10,29)),ITvarid \"pow\"),\"pow\")]"
+      let (f5,_newSpan5,_tree5) = updateTokensForSrcSpan f4 sspan3 newToks2
+
+      (invariant f5) `shouldBe` []
+      (drawTreeEntry f5) `shouldBe`
+               "((1,1),(16,22))\n|\n"++
+               "+- ((1,1),(12,21))\n|  |\n"++
+               "|  +- ((1,1),(10,24))\n|  |\n"++
+               "|  +- ((10000000010,25),(10000000010,28))\n|  |\n"++
+               "|  `- ((10,26),(12,21))\n|\n"++
+               "+- ((10000000012,22),(10000000012,30))\n|\n"++
+               "`- ((12,25),(16,22))\n   |\n"++
+               "   +- ((12,25),(12,28))\n   |\n"++
+               "   +- ((10000000012,29),(10000000012,37))\n   |\n"++
+               "   `- ((12,32),(16,22))\n"
+
+
+      -- putToksAfterSpan test/testdata/LiftToToplevel/LetIn1.hs:10:25:(((False,0,0,10),25),((False,0,0,10),26)) at PlaceAdjacent:[(((10,25),(10,26)),ITinteger 0,"0")]
+      let sspan5 = posToSrcSpan forest ((10,25),(10,26))
+      newToks3 <- liftIO $ basicTokenise "0"
+      (show newToks3) `shouldBe` "[((((0,1),(0,2)),ITinteger 0),\"0\")]"
+      let (f6,_newSpan6) = addToksAfterSrcSpan f5 sspan5 PlaceAdjacent newToks3
+
+      (invariant f6) `shouldBe` []
+      (drawTreeEntry f6) `shouldBe`
+               "((1,1),(16,22))\n|\n"++
+               "+- ((1,1),(12,21))\n|  |\n"++
+               "|  +- ((1,1),(10,24))\n|  |\n"++
+               "|  +- ((10000000010,25),(10000000010,28))\n|  |  |\n"++
+               "|  |  +- ((10,25),(10,26))\n|  |  |\n"++
+               "|  |  `- ((1000010,29),(1000010,30))\n|  |\n"++
+               "|  `- ((10,26),(12,21))\n|\n"++
+               "+- ((10000000012,22),(10000000012,30))\n|\n"++
+               "`- ((12,25),(16,22))\n   |\n"++
+               "   +- ((12,25),(12,28))\n   |\n"++
+               "   +- ((10000000012,29),(10000000012,37))\n   |\n"++
+               "   `- ((12,32),(16,22))\n"
+
+
+      -- getToksForSpan test/testdata/LiftToToplevel/LetIn1.hs:11:25:("(((False,0,0,11),25),((False,0,0,11),26))",[((((11,25),(11,26)),ITvarid "z"),"z")])
+
+      let sspan6 = posToSrcSpan forest ((11,25),(11,26))
+      let (f7,toks7) = getTokensFor f6 sspan6
+
+      (invariant f7) `shouldBe` []
+      (drawTreeEntry f7) `shouldBe`
+               "((1,1),(16,22))\n|\n"++
+               "+- ((1,1),(12,21))\n|  |\n"++
+               "|  +- ((1,1),(10,24))\n|  |\n"++
+               "|  +- ((10000000010,25),(10000000010,28))\n|  |  |\n"++
+               "|  |  +- ((10,25),(10,26))\n|  |  |\n"++
+               "|  |  `- ((1000010,29),(1000010,30))\n|  |\n"++
+               "|  `- ((10,26),(12,21))\n|     |\n"++
+               "|     +- ((10,26),(11,24))\n|     |\n"++
+               "|     +- ((11,25),(11,26))\n|     |\n"++
+               "|     `- ((11,26),(12,21))\n|\n"++
+               "+- ((10000000012,22),(10000000012,30))\n|\n"++
+               "`- ((12,25),(16,22))\n   |\n"++
+               "   +- ((12,25),(12,28))\n   |\n"++
+               "   +- ((10000000012,29),(10000000012,37))\n   |\n"++
+               "   `- ((12,32),(16,22))\n"
+
+
+      -- putToksForSpan test/testdata/LiftToToplevel/LetIn1.hs:11:25:(((False,0,0,11),25),((False,0,0,11),26))[((((11,26),(11,29)),ITvarid "pow"),"pow")]
+
+      let (f8,_newSpan8,_tree8) = updateTokensForSrcSpan f7 sspan6 newToks2
+
+      (invariant f8) `shouldBe` []
+      (drawTreeEntry f8) `shouldBe`
+               "((1,1),(16,22))\n|\n"++
+               "+- ((1,1),(12,21))\n|  |\n"++
+               "|  +- ((1,1),(10,24))\n|  |\n"++
+               "|  +- ((10000000010,25),(10000000010,28))\n|  |  |\n"++
+               "|  |  +- ((10,25),(10,26))\n|  |  |\n"++
+               "|  |  `- ((1000010,29),(1000010,30))\n|  |\n"++
+               "|  `- ((10,26),(12,21))\n|     |\n"++
+               "|     +- ((10,26),(11,24))\n|     |\n"++
+               "|     +- ((10000000011,25),(10000000011,28))\n|     |\n"++
+               "|     `- ((11,26),(12,21))\n|\n"++
+               "+- ((10000000012,22),(10000000012,30))\n|\n"++
+               "`- ((12,25),(16,22))\n   |\n"++
+               "   +- ((12,25),(12,28))\n   |\n"++
+               "   +- ((10000000012,29),(10000000012,37))\n   |\n"++
+               "   `- ((12,32),(16,22))\n"
+
+
+      -- putToksAfterSpan test/testdata/LiftToToplevel/LetIn1.hs:11:25:(((False,0,0,11),25),((False,0,0,11),26)) at PlaceAdjacent:[(((11,25),(11,26)),ITvarid "z","z")]
+
+      newToks4 <- liftIO $ basicTokenise "z"
+      (show newToks4) `shouldBe` "[((((0,1),(0,2)),ITvarid \"z\"),\"z\")]"
+      let (f9,_newSpan9) = addToksAfterSrcSpan f8 sspan6 PlaceAdjacent newToks4
+
+      (invariant f9) `shouldBe` []
+      (drawTreeEntry f9) `shouldBe`
+               "((1,1),(16,22))\n|\n"++
+               "+- ((1,1),(12,21))\n|  |\n"++
+               "|  +- ((1,1),(10,24))\n|  |\n"++
+               "|  +- ((10000000010,25),(10000000010,28))\n|  |  |\n"++
+               "|  |  +- ((10,25),(10,26))\n|  |  |\n"++
+               "|  |  `- ((1000010,29),(1000010,30))\n|  |\n"++
+               "|  `- ((10,26),(12,21))\n|     |\n"++
+               "|     +- ((10,26),(11,24))\n|     |\n"++
+               "|     +- ((10000000011,25),(10000000011,28))\n|     |  |\n"++
+               "|     |  +- ((11,25),(11,26))\n|     |  |\n"++
+               "|     |  `- ((1000011,29),(1000011,30))\n|     |\n"++
+               "|     `- ((11,26),(12,21))\n|\n"++
+               "+- ((10000000012,22),(10000000012,30))\n|\n"++
+               "`- ((12,25),(16,22))\n   |\n"++
+               "   +- ((12,25),(12,28))\n   |\n"++
+               "   +- ((10000000012,29),(10000000012,37))\n   |\n"++
+               "   `- ((12,32),(16,22))\n"
+
+      -- Context in place, time for test
+
+      -- getToksForSpan test/testdata/LiftToToplevel/LetIn1.hs:(10,22)-(11,31)
+      let sspan9 = posToSrcSpan forest ((10,22),(11,31))
+      let (f10,_toks10) = getTokensFor f9 sspan9
+
+--
+      let z = openZipperToSpan (fs sspan9) $ Z.fromTree f9
+      -- let (before,middle,end) = doSplitTree (Z.tree z) (fs sspan9)
+      let (before,middle,end) = splitSubtree (Z.tree z) (fs sspan9)
+      (show (map treeStartEnd before,map treeStartEnd middle,map treeStartEnd end)) `shouldBe`
+               "([],"++
+               "[(((ForestLine False 0 0 1),1),((ForestLine False 0 0 10),24)),"++
+                "(((ForestLine True 0 0 10),25),((ForestLine True 0 0 10),28)),"++
+                "(((ForestLine False 0 0 10),26),((ForestLine False 0 0 12),21))],"++
+               "[])"
+      let (b2,m2,e2) = splitSubToks (head middle) (fs sspan9)
+      -- (show (b2,m2,e2)) `shouldBe` ""
+      let (b3,m3,e3) = splitSubtree (last middle) (fs sspan9)
+      (show (map treeStartEnd b3,map treeStartEnd m3,map treeStartEnd  e3)) `shouldBe` 
+               "([],"++
+               "[(((ForestLine False 0 0 10),26),((ForestLine False 0 0 11),24)),"++
+                "(((ForestLine True 0 0 11),25),((ForestLine True 0 0 11),28)),"++
+                "(((ForestLine False 0 0 11),26),((ForestLine False 0 0 12),21))],"++
+               "[])"
+      let ss9 = (((ForestLine False 0 0 11),26),((ForestLine False 0 0 12),21))
+      (show (containsStart ss9 (fs sspan9),containsEnd ss9 (fs sspan9))) `shouldBe` "(False,True)"
+      let (b4,m4,e4) = splitSubToks (last m3) (fs sspan9)
+      -- (show (b4,m4,e4)) `shouldBe` ""
+--
+
+      (drawTreeEntry f10) `shouldBe`
+               "((1,1),(16,22))\n|\n"++
+               "+- ((1,1),(12,21))\n|  |\n"++
+               "|  +- ((1,1),(10,21))\n|  |\n"++
+               "|  +- ((10,22),(11,31))\n|  |  |\n"++
+               "|  |  +- ((10,22),(11,31))\n|  |  |\n"++
+               "|  |  +- ((10000000010,25),(10000000010,28))\n|  |  |  |\n"++
+               "|  |  |  +- ((10,25),(10,26))\n|  |  |  |\n"++
+               "|  |  |  `- ((1000010,29),(1000010,30))\n|  |  |\n"++
+               "|  |  +- ((10,26),(11,24))\n|  |  |\n"++
+               "|  |  +- ((10000000011,25),(10000000011,28))\n|  |  |  |\n"++
+               "|  |  |  +- ((11,25),(11,26))\n|  |  |  |\n"++
+               "|  |  |  `- ((1000011,29),(1000011,30))\n|  |  |\n"++
+               "|  |  `- ((11,26),(11,31))\n|  |\n"++     -- *PROBLEM*
+               "|  `- ((12,19),(12,21))\n|\n"++
+               "+- ((10000000012,22),(10000000012,30))\n|\n"++
+               "`- ((12,25),(16,22))\n   |\n"++
+               "   +- ((12,25),(12,28))\n   |\n"++
+               "   +- ((10000000012,29),(10000000012,37))\n   |\n"++
+               "   `- ((12,32),(16,22))\n"
+
+      (invariant f10) `shouldBe` []
+
+    ------------------------------------
+
+    it "updates tokens without breaking things" $ do
+      (_t,toks) <- parsedFileGhc "./test/testdata/LiftToToplevel/PatBindIn3.hs"
+      let forest = mkTreeFromTokens toks
+
+
+      -- putToksForSpan test/testdata/LiftToToplevel/PatBindIn3.hs:9:16-17:(((False,0,0,9),16),((False,0,0,9),18))
+      newToks1 <- liftIO $ basicTokenise "(sq x pow)"
+      (show newToks1) `shouldBe` "[((((0,1),(0,2)),IToparen),\"(\"),((((0,2),(0,4)),ITvarid \"sq\"),\"sq\"),((((0,5),(0,6)),ITvarid \"x\"),\"x\"),((((0,7),(0,10)),ITvarid \"pow\"),\"pow\"),((((0,10),(0,11)),ITcparen),\")\")]"
+
+      let sspan1 = posToSrcSpan forest ((9,16),(9,18))
+
+      let (f2,_newSpan2,_tree2) = updateTokensForSrcSpan forest sspan1 newToks1
+
+      (invariant f2) `shouldBe` []
+      (drawTreeEntry f2) `shouldBe`
+               "((1,1),(15,22))\n|\n"++
+               "+- ((1,1),(9,15))\n|\n"++
+               "+- ((10000000009,16),(10000000009,26))\n|\n"++
+               "`- ((9,19),(15,22))\n"
+      let toks2 = retrieveTokensFinal f2
+      (GHC.showRichTokenStream toks2) `shouldBe` "module LiftToToplevel.PatBindIn3 where\n\n --A definition can be lifted from a where or let to the top level binding group.\n --Lifting a definition widens the scope of the definition.\n\n --In this example, lift 'sq' defined in 'sumSquares'\n --This example aims to test changing a constant to a function.\n\n sumSquares x = (sq x pow)+ sq\n            where\n               sq = x^pow\n               pow =2\n\n anotherFun 0 y = sq y\n      where sq x = x^2\n\n "
+
+      -- putToksForSpan test/testdata/LiftToToplevel/PatBindIn3.hs:9:21-22:(((False,0,0,9),21),((False,0,0,9),23))
+      (show newToks1) `shouldBe` "[((((0,1),(0,2)),IToparen),\"(\"),((((0,2),(0,4)),ITvarid \"sq\"),\"sq\"),((((0,5),(0,6)),ITvarid \"x\"),\"x\"),((((0,7),(0,10)),ITvarid \"pow\"),\"pow\"),((((0,10),(0,11)),ITcparen),\")\")]"
+
+      let sspan2 = posToSrcSpan forest ((9,21),(9,23))
+
+--
+      -- (show f2) `shouldBe` ""
+{-
+      let z = openZipperToSpan (fs sspan2) $ Z.fromTree f2
+      (Z.isLeaf z) `shouldBe` True
+
+      let (forest',tree@(Node (Entry _s _) _)) = getSrcSpanFor f2 (fs sspan2)
+      (drawTreeEntry forest') `shouldBe`
+               "((1,1),(15,22))\n|\n"++
+               "+- ((1,1),(9,15))\n|\n"++
+               "+- ((10000000009,16),(10000000009,26))\n|\n"++
+               "`- ((9,19),(15,22))\n   |\n"++
+               "   +- ((9,19),(9,20))\n   |\n"++
+               "   +- ((9,21),(9,23))\n   |\n"++
+               "   `- ((10,12),(15,22))\n"
+
+      let zf = openZipperToNode tree $ Z.fromTree forest'
+      (show zf) `shouldBe` ""
+-}
+--
+
+      let (f3,_newSpan3,_tree3) = updateTokensForSrcSpan f2 sspan2 newToks1
+      (invariant f3) `shouldBe` []
+      (drawTreeEntry f3) `shouldBe`
+               "((1,1),(15,22))\n|\n"++
+               "+- ((1,1),(9,15))\n|\n"++
+               "+- ((10000000009,16),(10000000009,26))\n|\n"++
+               "`- ((9,19),(15,22))\n   |\n"++
+               "   +- ((9,19),(9,20))\n   |\n"++
+               "   +- ((10000000009,21),(10000000009,31))\n   |\n"++
+               "   `- ((10,12),(15,22))\n"
+      let toks3 = retrieveTokensFinal f3
+      (GHC.showRichTokenStream toks3) `shouldBe` "module LiftToToplevel.PatBindIn3 where\n\n --A definition can be lifted from a where or let to the top level binding group.\n --Lifting a definition widens the scope of the definition.\n\n --In this example, lift 'sq' defined in 'sumSquares'\n --This example aims to test changing a constant to a function.\n\n sumSquares x = (sq x pow)+ (sq x pow)\n            where\n               sq = x^pow\n               pow =2\n\n anotherFun 0 y = sq y\n      where sq x = x^2\n\n "
 
   -- ---------------------------------------------
 
@@ -1660,13 +2158,26 @@ tree TId 0:
 
       (show $ filter contains childrenAsZ) `shouldBe` "[]"
 
+--
+      let z = openZipperToSpan (fs sspan3) $ Z.fromTree f2
+      let (b1,m1,e1) = splitSubtree (Z.tree z) (fs sspan3)
+      (show (map treeStartEnd b1,map treeStartEnd m1,map treeStartEnd e1)) `shouldBe` 
+              "([(((ForestLine False 0 0 1),1),((ForestLine False 0 0 6),20))],"++
+               "[(((ForestLine True 0 0 6),21),((ForestLine True 0 0 6),23)),"++
+                "(((ForestLine False 0 0 6),26),((ForestLine False 0 0 7),18))],"++
+               "[])"
+      let (b2,m2,e2) = splitSubToks (head m1) (fs sspan3)
+      -- (show (b2,m2,e2)) `shouldBe` ""
+--
       let fss = insertSrcSpan f2 (srcSpanToForestSpan sspan3)
       (drawTreeEntry fss) `shouldBe`
               "((1,1),(13,25))\n|\n"++
               "+- ((1,1),(7,18))\n|  |\n"++
               "|  +- ((1,1),(6,20))\n|  |\n"++
-              "|  +- ((6,21),(6,41))\n|  |\n"++
-              "|  `- ((7,1),(7,18))\n|\n"++ -- Problem line
+              "|  +- ((6,21),(6,41))\n|  |  |\n"++
+              "|  |  +- ((10000000006,21),(10000000006,41))\n|  |  |\n"++
+              "|  |  `- ((6,26),(6,41))\n|  |\n"++
+              "|  `- ((7,1),(7,18))\n|\n"++
               "`- ((11,1),(13,25))\n"
 
 
@@ -1675,9 +2186,11 @@ tree TId 0:
               "((1,1),(13,25))\n|\n"++
               "+- ((1,1),(7,18))\n|  |\n"++
               "|  +- ((1,1),(6,20))\n|  |\n"++
-              "|  +- ((6,21),(6,41))\n|  |\n"++
+              "|  +- ((6,21),(6,41))\n|  |  |\n"++
+              "|  |  +- ((10000000006,21),(10000000006,41))\n|  |  |\n"++
+              "|  |  `- ((6,26),(6,41))\n|  |\n"++
               "|  +- ((1000007,5),(1000010,7))\n|  |\n"++
-              "|  `- ((7,1),(7,18))\n|\n"++ -- Problem line
+              "|  `- ((7,1),(7,18))\n|\n"++
               "`- ((11,1),(13,25))\n"
 
       (showSrcSpanF sspan'') `shouldBe` "(((False,0,1,7),5),((False,0,1,10),7))"
@@ -1819,6 +2332,148 @@ tree TId 0:
       (showSrcSpanF newSpan) `shouldBe` "(((False,0,1,12),26),((False,0,1,13),34))"
       (invariant forest'') `shouldBe` []
       (GHC.showRichTokenStream $ retrieveTokens forest'') `shouldBe` "module Demote.LetIn1 where\n\n --A definition can be demoted to the local 'where' binding of a friend declaration,\n --if it is only used by this friend declaration.\n\n --Demoting a definition narrows down the scope of the definition.\n --In this example, demote the local  'pow' to 'sq'\n --This example also aims to test the demoting a local declaration in 'let'.\n\n sumSquares x y = let sq 0=0\n                      sq z=z^pow\n                          where\n                             pow=2\n                          \n\n \n                  in sq x + sq y\n\n\n anotherFun 0 y = sq y\n      where  sq x = x^2\n\n   "
+
+    -- ---------------------------------
+
+    it "Adds a SrcSpan, chasing a bug in MoveDef" $ do
+      (_t,toks)  <- parsedFileGhc "./test/testdata/MoveDef/Md1.hs"
+      let forest = mkTreeFromTokens toks
+
+      -- getToksForSpan test/testdata/MoveDef/Md1.hs:24:5-10:("(((False,0,0,24),5),((False,0,0,24),11))",
+      let sspan1 = posToSrcSpan forest ((24,5),(24,11))
+      let (f1,_toks1) = getTokensFor forest sspan1
+
+      (drawTreeEntry f1) `shouldBe`
+              "((1,1),(40,17))\n|\n"++
+              "+- ((1,1),(23,8))\n|\n"++
+              "+- ((24,5),(24,11))\n|\n"++
+              "`- ((26,1),(40,17))\n"
+      (invariant f1) `shouldBe` []
+
+      -- removeToksForPos ((24,5),(24,11))
+      let (f2,_) = removeSrcSpan f1 (srcSpanToForestSpan sspan1)
+      (drawTreeEntry f2) `shouldBe`
+              "((1,1),(40,17))\n|\n"++
+              "+- ((1,1),(23,8))\n|\n"++
+              "`- ((26,1),(40,17))\n"
+      (invariant f2) `shouldBe` []
+
+      -- removeToksForPos ((23,3),(23,8))
+      let sspan3 = posToSrcSpan forest ((23,3),(23,8))
+      let (f3,_) = removeSrcSpan f2 (srcSpanToForestSpan sspan3)
+      (drawTreeEntry f3) `shouldBe`
+              "((1,1),(40,17))\n|\n"++
+              "+- ((1,1),(23,8))\n|  |\n"++
+              "|  `- ((1,1),(22,14))\n|\n"++
+              "`- ((26,1),(40,17))\n"
+      (invariant f3) `shouldBe` []
+
+      -- Context set, time for test
+
+      -- putDeclToksAfterSpan test/testdata/MoveDef/Md1.hs:(22,1)-(24,10):("(((False,0,0,22),1),((False,0,0,24),11))",PlaceOffset 2 0 2,[((((1,6),(1,8)),ITvarid "zz"),"zz"),((((1,9),(1,10)),ITequal),"="),((((1,11),(1,12)),ITinteger 1),"1")])
+      newToks <- basicTokenise "\n     zz = 1"
+      (show newToks) `shouldBe` "[((((1,6),(1,8)),ITvarid \"zz\"),\"zz\"),((((1,9),(1,10)),ITequal),\"=\"),((((1,11),(1,12)),ITinteger 1),\"1\")]"
+
+      let sspan4 = posToSrcSpan forest ((22,1),(24,11))
+
+--
+      let z = openZipperToSpan (fs sspan4) $ Z.fromTree f3
+      (drawTreeEntry $ Z.tree z) `shouldBe`
+              "((1,1),(40,17))\n|\n"++
+              "+- ((1,1),(23,8))\n|  |\n"++
+              "|  `- ((1,1),(22,14))\n|\n"++
+              "`- ((26,1),(40,17))\n"
+
+
+      -- let (b1,m1,e1) = doSplitTree (Z.tree z) (fs sspan4)
+      let (b1,m1,e1) = splitSubtree (Z.tree z) (fs sspan4)
+      (show (map treeStartEnd b1,map treeStartEnd m1,map treeStartEnd e1)) `shouldBe` 
+              "([],"++
+              "[(((ForestLine False 0 0 1),1),((ForestLine False 0 0 23),8))],"++
+              "[(((ForestLine False 0 0 26),1),((ForestLine False 0 0 40),17))])"
+
+      let (b2,m2,e2) = splitSubtree (head m1) (fs sspan4)
+      (show (map treeStartEnd b2,map treeStartEnd m2,map treeStartEnd e2)) `shouldBe` 
+              "([],"++
+              "[(((ForestLine False 0 0 1),1),((ForestLine False 0 0 22),14))],"++
+              "[])"
+
+      let (Node (Entry ss toks2) _) = head m2
+
+      (containsStart ss (fs sspan4),containsEnd ss (fs sspan4)) `shouldBe` (True,False)
+
+      let (sspanStart,sspanEnd) = fs sspan4
+
+      let (_,toksb,toksm) = splitToks (forestSpanToSimpPos (nullPos,sspanStart)) toks2
+      (show (head toksb,last toksb)) `shouldBe`
+               "(((((1,1),(1,7)),ITmodule),\"module\"),"++
+               "((((21,14),(21,17)),ITconid \"Int\"),\"Int\"))"
+      (show (head toksm,last toksm)) `shouldBe`
+               "(((((22,1),(22,1)),ITsemi),\"\"),"++
+               "((((22,12),(22,14)),ITvarid \"zz\"),\"zz\"))"
+
+      let (b3,m3,e3) = splitSubToks (head m2) (fs sspan4)
+      (show (map treeStartEnd b3,map treeStartEnd m3,map treeStartEnd e3)) `shouldBe`
+              "([(((ForestLine False 0 0 1),1),((ForestLine False 0 0 21),17))],"++
+               "[(((ForestLine False 0 0 22),1),((ForestLine False 0 0 24),11))],"++
+               "[])"
+
+
+
+      let f3' = insertSrcSpan f3 (fs sspan4)
+      (drawTreeEntry f3') `shouldBe`
+              "((1,1),(40,17))\n|\n"++
+              "+- ((1,1),(21,17))\n|\n"++
+              "+- ((22,1),(24,11))\n|\n"++
+              "`- ((26,1),(40,17))\n"
+      (invariant f3') `shouldBe` []
+
+      let (fwithspan,tree) = getSrcSpanFor f3 (srcSpanToForestSpan sspan4)
+      (drawTreeEntry fwithspan) `shouldBe`
+              "((1,1),(40,17))\n|\n"++
+              "+- ((1,1),(21,17))\n|\n"++
+              "+- ((22,1),(24,11))\n|\n"++
+              "`- ((26,1),(40,17))\n"
+
+      let toks'' = placeToksForSpan fwithspan sspan4 tree (PlaceOffset 2 0 2) newToks
+      let (startPos,endPos) = nonCommentSpan toks''
+      let newSpan = posToSrcSpan forest (startPos,endPos)
+      (GHC.showPpr newSpan) `shouldBe` "test/testdata/MoveDef/Md1.hs:24:1-6"
+
+      let (forest',tree') = getSrcSpanFor f3 (srcSpanToForestSpan sspan4)
+      -- (show tree') `shouldBe` ""
+
+      -- let (forest',newSpan') = addNewSrcSpanAndToksAfter f3 sspan4 newSpan (PlaceOffset 2 0 2) newToks
+      (drawTreeEntry forest') `shouldBe`
+              "((1,1),(40,17))\n|\n"++
+              "+- ((1,1),(21,17))\n|\n"++
+              "+- ((22,1),(24,11))\n|\n"++
+              "`- ((26,1),(40,17))\n"
+
+      let (ghcl,_c) = getGhcLoc newSpan
+      let (ForestLine ch tr v l) = ghcLineToForestLine ghcl
+      let newSpan' = insertForestLineInSrcSpan (ForestLine ch tr (v+1) l) newSpan
+      let toks' = placeToksForSpan forest' sspan4 tree' (PlaceOffset 2 0 2) newToks
+      let newNode = Node (Entry (srcSpanToForestSpan newSpan') toks') []
+      (show newNode) `shouldBe` "Node {rootLabel = Entry (((ForestLine False 0 1 24),1),((ForestLine False 0 1 24),7)) [((((24,1),(24,3)),ITvarid \"zz\"),\"zz\"),((((24,4),(24,5)),ITequal),\"=\"),((((24,6),(24,7)),ITinteger 1),\"1\"),((((26,1),(26,1)),ITvocurly),\"\")], subForest = []}"
+
+      let forest'' = insertNodeAfter tree' newNode forest'
+      (drawTreeEntry forest'') `shouldBe`
+              "((1,1),(40,17))\n|\n"++
+              "+- ((1,1),(21,17))\n|\n"++
+              "+- ((22,1),(24,11))\n|\n"++
+              "+- ((1000024,1),(1000024,7))\n|\n"++
+              "`- ((26,1),(40,17))\n"
+--
+
+      let (f4,_newSpan4) = addToksAfterSrcSpan f3 sspan4 (PlaceOffset 2 0 2) newToks
+      (drawTreeEntry f4) `shouldBe`
+              "((1,1),(40,17))\n|\n"++
+              "+- ((1,1),(21,17))\n|\n"++
+              "+- ((22,1),(24,11))\n|\n"++
+              "+- ((1000024,1),(1000024,7))\n|\n"++
+              "`- ((26,1),(40,17))\n"
+      (invariant f4) `shouldBe` []
 
   -- ---------------------------------------------
 
@@ -2228,6 +2883,14 @@ liftD1FileName = GHC.mkFastString "./test/testdata/LiftToToplevel/D1.hs"
 
 parsedFileLiftD1Ghc :: IO (ParseResult,[PosToken])
 parsedFileLiftD1Ghc = parsedFileGhc "./test/testdata/LiftToToplevel/D1.hs"
+
+-- ---------------------------------------------------------------------
+
+liftLetIn1FileName :: GHC.FastString
+liftLetIn1FileName = GHC.mkFastString "./test/testdata/LiftToToplevel/LetIn1.hs"
+
+parsedFileLiftLetIn1Ghc :: IO (ParseResult,[PosToken])
+parsedFileLiftLetIn1Ghc = parsedFileGhc "./test/testdata/LiftToToplevel/LetIn1.hs"
 
 -- ---------------------------------------------------------------------
 

@@ -319,7 +319,6 @@ applyRefac refac source = do
     res <- refac  -- Run the refactoring, updating the state as required
 
     mod'  <- getRefactRenamed
-    -- toks' <- fetchToks
     toks' <- fetchToksFinal
     m     <- getRefactStreamModified
 
@@ -536,8 +535,13 @@ writeRefactoredFiles _isSubRefactor files
            -- its first argument and returns its second argument. It
            -- is unclear for me why (length source) evaluation is
            -- forced.
+
+           -- seq :: a -> b -> b
+           -- infixr 0 seq
+
            -- seq (length source) (AbstractIO.writeFile fileName source) -- ++AZ++ TODO: restore this when ready for production
            seq (length source) (writeFile (fileName ++ ".refactored") source)
+           -- putStrLn $ "writeRefactoredFiles:seq done"
 
            writeFile (fileName ++ ".tokens") (showToks ts')
            -- writeFile (fileName ++ ".tokens") (showToks $ filter (\t -> not $ isEmpty t) ts)
