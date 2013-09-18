@@ -77,12 +77,12 @@ comp maybeMainFile fileName (row, col) = do
        parsed  <- getRefactParsed
 
        -- 1) get variable name
-       let pnt  = locToPNT (GHC.mkFastString fileName) (row, col) renamed
+       --let pnt  = locToPNT (GHC.mkFastString fileName) (row, col) renamed
        let name = locToName (GHC.mkFastString fileName) (row, col) renamed
        -- error (SYB.showData SYB.Parser 0 name)
 
        case name of
-            (Just pn) -> do (refactoredMod@(_, (t, s)), _) <- applyRefac (doTransact pnt pn) (RSFile fileName)
+            (Just pn) -> do (refactoredMod@(_, (t, s)), _) <- applyRefac (doTransact pn) (RSFile fileName)
                             return [refactoredMod]
             Nothing   -> error "Incorrect identifier selected!"
 
@@ -100,8 +100,8 @@ comp maybeMainFile fileName (row, col) = do
        -- putStrLn "Completd"
 
 
-doTransact :: PNT -> GHC.Located GHC.Name -> RefactGhc () 
-doTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n) = do
+doTransact :: GHC.Located GHC.Name -> RefactGhc () 
+doTransact name@(GHC.L s n) = do
     inscopes <- getRefactInscopes
     renamed  <- getRefactRenamed
     parsed   <- getRefactParsed
@@ -114,12 +114,12 @@ doTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n) = do
     -- /adding import
 
     typechecked <- liftM GHC.tm_typechecked_source getTypecheckedModule -- >>= (return.GHC.tm_typechecked_source)
-    reallyDoTransact pnt name renamed typechecked
+    reallyDoTransact name renamed typechecked
 --    reallyDoTransact pnt name renamed
 
 
-reallyDoTransact :: PNT -> GHC.Located GHC.Name -> GHC.RenamedSource -> GHC.TypecheckedSource-> RefactGhc ()
-reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed typechecked = do
+reallyDoTransact :: GHC.Located GHC.Name -> GHC.RenamedSource -> GHC.TypecheckedSource-> RefactGhc ()
+reallyDoTransact name@(GHC.L s n1) renamed typechecked = do
 --reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed = do
 
     -- TODO: Add import declaration for STM module, if it doesn't exists.
