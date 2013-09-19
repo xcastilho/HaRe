@@ -44,6 +44,7 @@ import Data.Maybe
 import Data.List (isPrefixOf)
 -----------------
 
+import Language.Haskell.GhcMod
 import Language.Haskell.Refact.Utils
 import Language.Haskell.Refact.Utils.GhcUtils
 import Language.Haskell.Refact.Utils.LocUtils
@@ -55,18 +56,18 @@ import Language.Haskell.Refact.Utils.TypeUtils
 
 import Debug.Trace
 
-transact :: [String] -> IO ()
-transact args = do
-    runRefacSession Nothing Nothing (comp Nothing fileName (row,col))
+transact :: RefactSettings -> Cradle -> [String] -> IO ()
+transact settings cradle args = do
+    runRefacSession settings cradle (comp fileName (row,col))
     return () where
         fileName = ghead "filename" args
         row = read (args!!1)::Int
         col = read (args!!2)::Int
 
-comp :: Maybe FilePath -> String -> SimpPos
+comp :: String -> SimpPos
      -> RefactGhc [ApplyRefacResult]	
-comp maybeMainFile fileName (row, col) = do
-       loadModuleGraphGhc maybeMainFile
+comp fileName (row, col) = do
+       --loadModuleGraphGhc maybeMainFile
        --modInfo@(t, _tokList) <- getModuleGhc fileName
        getModuleGhc fileName
 --     /== type checking ==\
@@ -168,9 +169,9 @@ reallyDoTransact name@(GHC.L s n1) renamed typechecked = do
         putRefactRenamed renamed'
 
         liftIO $ putStrLn $ "Found name? "++show (isJust (getName "Control.Concurrent.STM.TMVar.newEmptyTMVarIO" renamed))
-        liftIO $ putStrLn $"Number of applications "++ show (length applications) ++ " " ++ GHC.showPpr applications
+        liftIO $ putStrLn $"Number of applications "++ show (length applications) ++ " " -- ++ GHC.showPpr applications
         liftIO $ putStrLn $"Number of uncommon functions "++ show (length uncommonApps) ++ " " ++ SYB.showData SYB.Renamer 0 uncommonApps
-        liftIO $ putStrLn $"Number of common functions "++ show (length commonApps2) ++ " " ++ GHC.showPpr commonApps2
+        liftIO $ putStrLn $"Number of common functions "++ show (length commonApps2) ++ " " -- ++ GHC.showPpr commonApps2
         liftIO $ putStrLn $"Number of bindings "++ show (length binding) ++ " " ++ SYB.showData SYB.Renamer 0 binding
 --(GHC.showPpr binding)
 
@@ -226,7 +227,7 @@ reallyDoTransact name@(GHC.L s n1) renamed typechecked = do
 
                     newName <- translateFunction nv
                     newf <- newFuncName oldf newName
-                    updateToks oldf newf GHC.showPpr False
+                    --updateToks oldf newf GHC.showPpr False
                     return $ GHC.BindStmt (GHC.L x (GHC.VarPat n2)) newf z w
          inMod (bindSt@(GHC.BindStmt
             (GHC.L x (GHC.VarPat n2))
@@ -237,7 +238,7 @@ reallyDoTransact name@(GHC.L s n1) renamed typechecked = do
 --                    let typeOfPattern = typeOf (GHC.VarPat n2)
                     newName <- translateFunction nv
                     let newf = GHC.L l $ GHC.HsApp (GHC.L y (GHC.HsVar newName)) exp2
-                    updateToks oldf newf GHC.showPpr False
+                    --updateToks oldf newf GHC.showPpr False
                     return $ GHC.BindStmt (GHC.L x (GHC.VarPat n2)) newf z w
          inMod func = return func
 
@@ -260,7 +261,7 @@ reallyDoTransact name@(GHC.L s n1) renamed typechecked = do
             | startEndLineCol exp `elem` selectedApps
                    = do
                     translatedTree <- translateHsApp True app
-                    updateToks exp (GHC.L l translatedTree) GHC.showPpr False
+                    --updateToks exp (GHC.L l translatedTree) GHC.showPpr False
                     return (GHC.L l translatedTree) 
          inExp _ e = return e
 
@@ -310,8 +311,8 @@ rmPreludeImports = filter isPrelude where
             isPrelude = (/="Prelude") . GHC.moduleNameString . GHC.unLoc . GHC.ideclName . GHC.unLoc
 
 
-prettyprint :: (GHC.Outputable a) => a -> String
-prettyprint  = GHC.showPpr 
+--prettyprint :: (GHC.Outputable a) => a -> String
+--prettyprint  = GHC.showPpr 
 
 
 -- | Gets the Located VarPat from a BindStmt, or errors if not a VarPat BindStmt.
@@ -394,7 +395,7 @@ matchesAnyPrefix prefixes text = or [ x `isPrefixOf` text | x <- prefixes ]
 
 translateFunction :: GHC.Name -> RefactGhc GHC.Name 
 translateFunction n =
-    mkNewGhcName $ case nameToString n of 
+    mkNewGhcName Nothing $ case nameToString n of 
         "GHC.MVar.takeMVar"     -> "takeTMVar"
         "GHC.MVar.putMVar"      -> "putTMVar"
         "GHC.MVar.newEmptyMVar" -> "newEmptyTMVarIO"
@@ -420,7 +421,7 @@ translateHsApp :: Bool -- ^ Is this function the topmost application? Deals with
 translateHsApp isTopNode (GHC.HsApp (GHC.L l insideApp@(GHC.HsApp _ _)) exp2 ) = do
     translatedLeaf <- translateHsApp False insideApp
     if isTopNode then do
-             atomicallyName <- mkNewGhcName "atomically"
+             atomicallyName <- mkNewGhcName Nothing "atomically"
              return $ GHC.HsApp 
                           (GHC.L l (GHC.HsVar atomicallyName)) 
                           (GHC.L l (GHC.HsPar (GHC.L l (GHC.HsApp 
@@ -436,7 +437,7 @@ translateHsApp isTopNode (GHC.HsApp (GHC.L l (GHC.HsVar functionName)) (GHC.L l2
     tmfunction <- translateFunction functionName
     let translatedNode = GHC.HsApp (GHC.L l (GHC.HsVar tmfunction)) (GHC.L l exp2)
     if isTopNode then do
-        atomicallyName <- mkNewGhcName "atomically"
+        atomicallyName <- mkNewGhcName Nothing "atomically"
         return $ GHC.HsApp 
                 (GHC.L l (GHC.HsVar atomicallyName)) 
                 (GHC.L l (GHC.HsPar (GHC.L l translatedNode )))
