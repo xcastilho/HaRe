@@ -80,7 +80,7 @@ spec = do
       let (tm'',newSpan,decl') = addDeclToksAfterSrcSpan tm' l (PlaceOffset 2 0 2) declToks decl
       (showGhc newSpan) `shouldBe` "test/testdata/DupDef/Dd1.hs:1048582:1-18"
 
-      (SYB.showData SYB.Renamer 0 decl') `shouldBe` "\n(L {test/testdata/DupDef/Dd1.hs:1048582:1-18} \n (FunBind \n  (L {test/testdata/DupDef/Dd1.hs:1048582:1-8} {Name: DupDef.Dd1.toplevel}) \n  (False) \n  (MatchGroup \n   [\n    (L {test/testdata/DupDef/Dd1.hs:4:1-18} \n     (Match \n      [\n       (L {test/testdata/DupDef/Dd1.hs:1048582:10} \n        (VarPat {Name: x}))] \n      (Nothing) \n      (GRHSs \n       [\n        (L {test/testdata/DupDef/Dd1.hs:4:14-18} \n         (GRHS \n          [] \n          (L {test/testdata/DupDef/Dd1.hs:1048582:14-18} \n           (OpApp \n            (L {test/testdata/DupDef/Dd1.hs:1048582:14} \n             (HsVar {Name: DupDef.Dd1.c})) \n            (L {test/testdata/DupDef/Dd1.hs:1048582:16} \n             (HsVar {Name: GHC.Num.*})) {Fixity: infixl 7} \n            (L {test/testdata/DupDef/Dd1.hs:1048582:18} \n             (HsVar {Name: x}))))))] \n       (EmptyLocalBinds))))] {!type placeholder here?!}) \n  (WpHole) {NameSet: \n  [{Name: DupDef.Dd1.c}]} \n  (Nothing)))"
+      (SYB.showData SYB.Renamer 0 decl') `shouldBe` "\n(L {test/testdata/DupDef/Dd1.hs:1048582:1-18} \n (FunBind \n  (L {test/testdata/DupDef/Dd1.hs:1048582:1-8} {Name: DupDef.Dd1.toplevel}) \n  (False) \n  (MatchGroup \n   [\n    (L {test/testdata/DupDef/Dd1.hs:1048582:1-18} \n     (Match \n      [\n       (L {test/testdata/DupDef/Dd1.hs:1048582:10} \n        (VarPat {Name: x}))] \n      (Nothing) \n      (GRHSs \n       [\n        (L {test/testdata/DupDef/Dd1.hs:4:14-18} \n         (GRHS \n          [] \n          (L {test/testdata/DupDef/Dd1.hs:1048582:14-18} \n           (OpApp \n            (L {test/testdata/DupDef/Dd1.hs:1048582:14} \n             (HsVar {Name: DupDef.Dd1.c})) \n            (L {test/testdata/DupDef/Dd1.hs:1048582:16} \n             (HsVar {Name: GHC.Num.*})) {Fixity: infixl 7} \n            (L {test/testdata/DupDef/Dd1.hs:1048582:18} \n             (HsVar {Name: x}))))))] \n       (EmptyLocalBinds))))] {!type placeholder here?!}) \n  (WpHole) {NameSet: \n  [{Name: DupDef.Dd1.c}]} \n  (Nothing)))"
 
       (drawTreeEntry tm'') `shouldBe`
             "((1,1),(32,18))\n|\n"++
@@ -2985,6 +2985,121 @@ tree TId 0:
 
   -- ---------------------------------------------
 
+  describe "indentDeclToks" $ do
+    it "adds a positive offset to a decl and toks" $ do
+      (t,toks) <- parsedFileLayoutIn2
+      let forest = mkTreeFromTokens toks
+
+      let renamed = fromJust $ GHC.tm_renamed_source t
+      let decls = hsBinds renamed
+
+      let Just decl@(GHC.L l _) = (locToExp (8,13) (12,43) renamed) :: Maybe (GHC.Located (GHC.HsExpr GHC.Name))
+
+      (showGhc l) `shouldBe` "test/testdata/Renaming/LayoutIn2.hs:(8,14)-(12,42)"
+      (showSrcSpan l) `shouldBe` "((8,14),(12,43))"
+
+      (showGhc decl) `shouldBe`
+           "case list of {\n"++
+           "  (1 : xs) -> 1\n"++
+           "  (2 : xs)\n"++
+           "    | x GHC.Classes.< 10 -> 4\n"++
+           "    where\n"++
+           "        x = GHC.List.last xs\n"++
+           "  otherwise -> 12 }"
+      let (GHC.L _ (GHC.HsCase expr (GHC.MatchGroup matches typ))) = decl
+      (showGhc expr) `shouldBe` "list"
+
+      let (GHC.L m1l _) = head matches
+      (showSrcSpan m1l) `shouldBe` "((8,28),(8,39))"
+      let (m1,forest') = indentDeclToks (head matches) forest 4
+
+      -- let toks' = retrieveTokensInterim forest'
+      (invariant forest') `shouldBe` []
+      (drawTreeEntry forest') `shouldBe`
+              "((10000000001,1),(10000000012,43))\n|\n"++
+              "+- ((1,1),(8,26))\n|\n"++
+              "+- ((8,32),(8,43))\n|\n"++ -- Indented by 4
+              "`- ((10,28),(12,43))\n"
+
+      let toksFinal = retrieveTokensFinal forest'
+      (GHC.showRichTokenStream toksFinal) `shouldBe` "module LayoutIn2 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'list' to 'ls'.\n\n silly :: [Int] -> Int\n silly list = case list of      (1:xs) -> 1\n --There is a comment\n                            (2:xs)\n                              | x < 10    -> 4  where  x = last xs\n                            otherwise -> 12\n\n "
+
+      let decl' = (GHC.L l (GHC.HsCase expr (GHC.MatchGroup (m1:(tail matches)) typ)))
+      (showGhc decl') `shouldBe` "case list of {\n  (1 : xs) -> 1\n  (2 : xs)\n    | x GHC.Classes.< 10 -> 4\n    where\n        x = GHC.List.last xs\n  otherwise -> 12 }"
+      (take 320 $ SYB.showData SYB.Renamer 0 decl') `shouldBe` "\n(L {test/testdata/Renaming/LayoutIn2.hs:(8,14)-(12,42)} \n (HsCase \n  (L {test/testdata/Renaming/LayoutIn2.hs:8:19-22} \n   (HsVar {Name: list})) \n  (MatchGroup \n   [\n    (L {test/testdata/Renaming/LayoutIn2.hs:8:32-42} \n     (Match \n      [\n       (L {test/testdata/Renaming/LayoutIn2.hs:8:32-37} \n        (ParPat \n     "
+
+    ------------------------------------
+
+    it "adds a negative offset to a decl and toks" $ do
+      (t,toks) <- parsedFileLayoutIn2
+      let forest = mkTreeFromTokens toks
+
+      let renamed = fromJust $ GHC.tm_renamed_source t
+      let decls = hsBinds renamed
+
+      let Just decl@(GHC.L l _) = (locToExp (8,13) (12,43) renamed) :: Maybe (GHC.Located (GHC.HsExpr GHC.Name))
+
+      (showGhc l) `shouldBe` "test/testdata/Renaming/LayoutIn2.hs:(8,14)-(12,42)"
+      (showSrcSpan l) `shouldBe` "((8,14),(12,43))"
+
+      (showGhc decl) `shouldBe`
+           "case list of {\n"++
+           "  (1 : xs) -> 1\n"++
+           "  (2 : xs)\n"++
+           "    | x GHC.Classes.< 10 -> 4\n"++
+           "    where\n"++
+           "        x = GHC.List.last xs\n"++
+           "  otherwise -> 12 }"
+      let (GHC.L _ (GHC.HsCase expr (GHC.MatchGroup matches typ))) = decl
+      (showGhc expr) `shouldBe` "list"
+
+      let (GHC.L m1l _) = head matches
+      (showSrcSpan m1l) `shouldBe` "((8,28),(8,39))"
+      let (m1,forest') = indentDeclToks (head matches) forest (-2)
+
+      -- let toks' = retrieveTokensInterim forest'
+      (invariant forest') `shouldBe` []
+      (drawTreeEntry forest') `shouldBe`
+              "((10000000001,1),(10000000012,43))\n|\n"++
+              "+- ((1,1),(8,26))\n|\n"++
+              "+- ((8,26),(8,37))\n|\n"++ -- dedented by 2
+              "`- ((10,28),(12,43))\n"
+
+      let toksFinal = retrieveTokensFinal forest'
+      (GHC.showRichTokenStream toksFinal) `shouldBe` "module LayoutIn2 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'list' to 'ls'.\n\n silly :: [Int] -> Int\n silly list = case list of(1:xs) -> 1\n --There is a comment\n                            (2:xs)\n                              | x < 10    -> 4  where  x = last xs\n                            otherwise -> 12\n\n "
+
+      let decl' = (GHC.L l (GHC.HsCase expr (GHC.MatchGroup (m1:(tail matches)) typ)))
+      (showGhc decl') `shouldBe` "case list of {\n  (1 : xs) -> 1\n  (2 : xs)\n    | x GHC.Classes.< 10 -> 4\n    where\n        x = GHC.List.last xs\n  otherwise -> 12 }"
+      (take 320 $ SYB.showData SYB.Renamer 0 decl') `shouldBe` "\n(L {test/testdata/Renaming/LayoutIn2.hs:(8,14)-(12,42)} \n (HsCase \n  (L {test/testdata/Renaming/LayoutIn2.hs:8:19-22} \n   (HsVar {Name: list})) \n  (MatchGroup \n   [\n    (L {test/testdata/Renaming/LayoutIn2.hs:8:26-36} \n     (Match \n      [\n       (L {test/testdata/Renaming/LayoutIn2.hs:8:26-31} \n        (ParPat \n     "
+
+      -- Now to do it for the second item in the list
+      let (GHC.L m2l _) = head $ drop 1 matches
+      (showSrcSpan m2l) `shouldBe` "((10,28),(11,66))"
+      let (m2,forest2) = indentDeclToks (head $ drop 1 matches) forest' (-2)
+
+      -- (show forest2) `shouldBe` ""
+      -- TODO: sort out this invariant failing
+      -- (show forest) `shouldBe` "forest"
+      -- (show forest') `shouldBe` "forest'"
+      -- (show forest2) `shouldBe` "forest2"
+      (invariant forest2) `shouldBe` []
+      (drawTreeEntry forest2) `shouldBe`
+              "((10000000001,1),(10000000012,43))\n|\n"++
+              "+- ((1,1),(8,26))\n|\n"++
+              "+- ((8,26),(8,37))\n|\n"++
+              "`- ((10000000010,28),(10000000012,43))\n   |\n"++
+              "   +- ((10,26),(11,64))\n   |\n"++
+              "   `- ((12,28),(12,43))\n"
+
+      let toksFinal2 = retrieveTokensFinal forest2
+      (GHC.showRichTokenStream toksFinal2) `shouldBe` "module LayoutIn2 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'list' to 'ls'.\n\n silly :: [Int] -> Int\n silly list = case list of(1:xs) -> 1\n--There is a comment\n                          (2:xs)\n                            | x < 10    -> 4  where  x = last xs\n                            otherwise -> 12\n\n "
+
+      let decl2 = (GHC.L l (GHC.HsCase expr (GHC.MatchGroup (m1:m2:(tail $ tail matches)) typ)))
+      (showGhc decl2) `shouldBe` "case list of {\n  (1 : xs) -> 1\n  (2 : xs)\n    | x GHC.Classes.< 10 -> 4\n    where\n        x = GHC.List.last xs\n  otherwise -> 12 }"
+      (take 320 $ SYB.showData SYB.Renamer 0 decl2) `shouldBe` "\n(L {test/testdata/Renaming/LayoutIn2.hs:(8,14)-(12,42)} \n (HsCase \n  (L {test/testdata/Renaming/LayoutIn2.hs:8:19-22} \n   (HsVar {Name: list})) \n  (MatchGroup \n   [\n    (L {test/testdata/Renaming/LayoutIn2.hs:8:26-36} \n     (Match \n      [\n       (L {test/testdata/Renaming/LayoutIn2.hs:8:26-31} \n        (ParPat \n     "
+
+  -- ---------------------------------------------
+
   describe "reSequenceToks" $ do
     it "Modifies a token stream to cater for changes in length of a token after e.g. renaming" $ do
       pending -- "write this"
@@ -3392,5 +3507,13 @@ dd1FileName = GHC.mkFastString "./test/testdata/DupDef/Dd1.hs"
 
 parsedFileDd1Ghc :: IO (ParseResult,[PosToken])
 parsedFileDd1Ghc = parsedFileGhc "./test/testdata/DupDef/Dd1.hs"
+
+-- ---------------------------------------------------------------------
+
+layoutIn2FileName :: GHC.FastString
+layoutIn2FileName = GHC.mkFastString "./test/testdata/Renaming/LayoutIn2.hs"
+
+parsedFileLayoutIn2 :: IO (ParseResult, [PosToken])
+parsedFileLayoutIn2 = parsedFileGhc "./test/testdata/Renaming/LayoutIn2.hs"
 
 -- ---------------------------------------------------------------------

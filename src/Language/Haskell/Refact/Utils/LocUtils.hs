@@ -56,7 +56,7 @@ module Language.Haskell.Refact.Utils.LocUtils(
                      , lexStringToRichTokens
                      , prettyprint -- , prettyprintGhc
                      , prettyprintPatList
-                     -- , groupTokensByLine
+                     , groupTokensByLine
                      , addLocInfo
                      -- , getIndentOffset
                      , getLineOffset
@@ -93,12 +93,13 @@ module Language.Haskell.Refact.Utils.LocUtils(
                      , isLet
                      , isElse
                      , isThen
+                     , isOf
+                     , isDo
                      , getIndentOffset
                      , splitOnNewLn
                      , tokenLen
                      , newLnToken
                      , newLinesToken
-                     , groupTokensByLine
                      , monotonicLineToks
                      , reSequenceToks
                      , mkToken
@@ -1266,6 +1267,11 @@ isEmpty _                               = False
 
 isWhereOrLet :: PosToken -> Bool
 isWhereOrLet t = isWhere t || isLet t
+
+-- ---------------------------------------------------------------------
+-- This section is horrible because there is no Eq instance for
+-- GHC.Token
+
 isWhere :: PosToken -> Bool
 isWhere ((GHC.L _ t),_s) =  case t of
                        GHC.ITwhere -> True
@@ -1284,6 +1290,20 @@ isThen :: PosToken -> Bool
 isThen   ((GHC.L _ t),_s) =  case t of
                        GHC.ITthen -> True
                        _         -> False
+
+isOf :: PosToken -> Bool
+isOf   ((GHC.L _ t),_s) =  case t of
+                       GHC.ITof -> True
+                       _        -> False
+
+isDo :: PosToken -> Bool
+isDo   ((GHC.L _ t),_s) =  case t of
+                       GHC.ITdo -> True
+                       _        -> False
+
+
+-- ---------------------------------------------------------------------
+
 
 -- ---------------------------------------------------------------------
 

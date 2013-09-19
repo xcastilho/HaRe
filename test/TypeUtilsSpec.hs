@@ -1,26 +1,18 @@
 module TypeUtilsSpec (main, spec) where
 
 import           Test.Hspec
-import           Test.QuickCheck
+-- import           Test.QuickCheck
 
 import           TestUtils
 
-import qualified Data.Generics.Schemes as SYB
-import qualified Data.Generics.Aliases as SYB
 import qualified GHC.SYB.Utils         as SYB
 
-import qualified Bag        as GHC
 import qualified FastString as GHC
 import qualified GHC        as GHC
-import qualified GhcMonad   as GHC
 import qualified Name       as GHC
-import qualified OccName    as GHC
-import qualified Outputable as GHC
 import qualified RdrName    as GHC
-import qualified SrcLoc     as GHC
 import qualified Module     as GHC
 
-import Control.Monad.State
 import Data.Maybe
 import Language.Haskell.Refact.Utils
 import Language.Haskell.Refact.Utils.GhcVersionSpecific
@@ -260,7 +252,7 @@ spec = do
 
 
   -- -------------------------------------------------------------------
-
+{-
   describe "definingDecls" $ do
     it "returns [] if not found" $ do
       (t, _toks) <- parsedFileDd1Ghc
@@ -332,7 +324,7 @@ spec = do
 
       let res = definingDecls [(PN (mkRdrName "zz"))] ds False False
       showGhc res `shouldBe` "[]"
-
+-}
   -- -------------------------------------------------------------------
 
   describe "definingDeclsNames" $ do
@@ -1855,15 +1847,15 @@ spec = do
          new <- renamePN n newName True False decl'
 
          return (new,newName)
-      let
 
       ((nb,nn),s) <- runRefactGhc comp $ initialState { rsModule = Just (RefMod {rsTokenCache = mkTokenCache forest''', rsTypecheckedMod = t, rsOrigTokenStream = toks, rsStreamModified=True})}
       -- ((nb,nn),s) <- runRefactGhc comp $ initialLogOnState { rsModule = Just (RefMod {rsTokenCache = mkTokenCache forest''', rsTypecheckedMod = t, rsOrigTokenStream = toks, rsStreamModified=True})}
+
       -- (show tfo) `shouldBe` ""
       (showGhc n) `shouldBe` "TokenTest.foo"
       (showToks $ [newNameTok False l nn]) `shouldBe` "[(((19,1),(19,5)),ITvarid \"bar2\",\"bar2\")]"
       (GHC.showRichTokenStream $ toks) `shouldBe` "module TokenTest where\n\n -- Test new style token manager\n\n bob a b = x\n   where x = 3\n\n bib a b = x\n   where\n     x = 3\n\n\n bab a b =\n   let bar = 3\n   in     b + bar -- ^trailing comment\n\n\n -- leading comment\n foo x y =\n   do c <- getChar\n      return c\n\n\n\n\n "
-      (GHC.showRichTokenStream $ toksFromState s) `shouldBe` "module TokenTest where\n\n -- Test new style token manager\n\n bob a b = x\n   where x = 3\n\n bib a b = x\n   where\n     x = 3\n\n\n bab a b =\n   let bar = 3\n   in     b + bar -- ^trailing comment\n\n\n -- leading comment\n foo x y =\n   do c <- getChar\n      return c\n\n -- leading comment\n bar2 x y =\n   do c <- getChar\n      return c\n\n "
+      (GHC.showRichTokenStream $ toksFromState s) `shouldBe` "module TokenTest where\n\n -- Test new style token manager\n\n bob a b = x\n   where x = 3\n\n bib a b = x\n   where\n     x = 3\n\n\n bab a b =\n   let bar = 3\n   in     b + bar -- ^trailing comment\n\n\n -- leading comment\n foo x y =\n   do c <- getChar\n      return c\n\n -- leading comment\n bar2 x y =\n   do c <- getChar\n      return c"
       (showGhc nb) `shouldBe` "bar2 x y\n  = do { c <- System.IO.getChar;\n         GHC.Base.return c }"
       -- (showToks $ take 20 $ toksFromState s) `shouldBe` ""
 
@@ -2109,7 +2101,7 @@ spec = do
       (showGhc n) `shouldBe` "list"
       (showToks $ [newNameTok False l nn]) `shouldBe` "[(((8,7),(8,9)),ITvarid \"ls\",\"ls\")]"
       (GHC.showRichTokenStream $ toks) `shouldBe` "module LayoutIn2 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'list' to 'ls'.\n\n silly :: [Int] -> Int\n silly list = case list of  (1:xs) -> 1\n --There is a comment\n                            (2:xs)\n                              | x < 10    -> 4  where  x = last xs\n                            otherwise -> 12\n\n "
-      (GHC.showRichTokenStream $ toksFromState s) `shouldBe` "module LayoutIn2 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'list' to 'ls'.\n\n silly :: [Int] -> Int\n silly ls   = case ls   of  ( 1 : xs ) -> 1\n --There is a comment\n                            (2:xs)\n                              | x < 10    -> 4  where  x = last xs\n                            otherwise -> 12\n\n "
+      (GHC.showRichTokenStream $ toksFromState s) `shouldBe` "module LayoutIn2 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'list' to 'ls'.\n\n silly :: [Int] -> Int\n silly ls = case ls of  (1:xs) -> 1\n--There is a comment\n                        (2:xs)\n                          | x < 10    -> 4  where  x = last xs\n                        otherwise -> 12"
       (unspace $ showGhc nb) `shouldBe` unspace "(LayoutIn2.silly :: [GHC.Types.Int] -> GHC.Types.Int\n LayoutIn2.silly ls\n = case ls of {\n (1 : xs) -> 1\n (2 : xs)\n | x GHC.Classes.< 10 -> 4\n where\n x = GHC.List.last xs\n otherwise -> 12 },\n [import (implicit) Prelude],\n Nothing,\n Nothing)"
 
 
@@ -2160,6 +2152,228 @@ spec = do
       (GHC.showRichTokenStream $ toks) `shouldBe` "module Renaming.C7(myFringe)  where\n\n import Renaming.D7\n\n myFringe:: Tree a -> [a]\n myFringe (Leaf x ) = [x]\n myFringe (Branch left right) = myFringe left ++ fringe right\n\n\n\n\n "
       (GHC.showRichTokenStream $ toksFromState s) `shouldBe` "module Renaming.C7(LocToName.myNewFringe)  where\n\n import Renaming.D7\n\n myNewFringe:: Tree a -> [a]\n myNewFringe (Leaf x ) = [x]\n myNewFringe (Branch left right) = LocToName.myNewFringe left ++ fringe right\n\n\n\n\n "
       (unspace $ showGhc nb) `shouldBe` unspace "(LocToName.myNewFringe :: Renaming.D7.Tree a -> [a]\n LocToName.myNewFringe (Renaming.D7.Leaf x) = [x]\n LocToName.myNewFringe (Renaming.D7.Branch left right)\n = LocToName.myNewFringe left GHC.Base.++ Renaming.D7.fringe right,\n [import (implicit) Prelude, import Renaming.D7],\n Just [LocToName.myNewFringe],\n Nothing)"
+
+    ------------------------------------
+
+    it "realigns toks in a case for a shorter name" $ do
+      (t, toks) <- parsedFileLayoutIn2
+      let renamed = fromJust $ GHC.tm_renamed_source t
+
+      let Just (GHC.L l n) = locToName layoutIn2FileName (8, 7) renamed
+      let
+        comp = do
+         logm $ "renamed:" ++ (SYB.showData SYB.Renamer 0 renamed)
+
+         newName <- mkNewGhcName Nothing "ls"
+         new <- renamePN n newName True True renamed
+
+         return (new,newName)
+
+      ((nb,nn),s) <- runRefactGhc comp $ initialState { rsModule = initRefactModule t toks }
+      -- ((nb,nn),s) <- runRefactGhc comp $ initialLogOnState { rsModule = initRefactModule t toks }
+      (showGhc n) `shouldBe` "list"
+      (showToks $ [newNameTok False l nn]) `shouldBe` "[(((8,7),(8,9)),ITvarid \"ls\",\"ls\")]"
+      (GHC.showRichTokenStream $ toks) `shouldBe` "module LayoutIn2 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'list' to 'ls'.\n\n silly :: [Int] -> Int\n silly list = case list of  (1:xs) -> 1\n --There is a comment\n                            (2:xs)\n                              | x < 10    -> 4  where  x = last xs\n                            otherwise -> 12\n\n "
+      (GHC.showRichTokenStream $ toksFromState s) `shouldBe` "module LayoutIn2 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'list' to 'ls'.\n\n silly :: [Int] -> Int\n silly ls = case ls of  (1:xs) -> 1\n--There is a comment\n                        (2:xs)\n                          | x < 10    -> 4  where  x = last xs\n                        otherwise -> 12"
+      (unspace $ showGhc nb) `shouldBe` unspace "(LayoutIn2.silly :: [GHC.Types.Int] -> GHC.Types.Int\n LayoutIn2.silly ls\n = case ls of {\n (1 : xs) -> 1\n (2 : xs)\n | x GHC.Classes.< 10 -> 4\n where\n x = GHC.List.last xs\n otherwise -> 12 },\n [import (implicit) Prelude],\n Nothing,\n Nothing)"
+
+
+
+    ------------------------------------
+
+    it "realigns toks in a case for a longer name" $ do
+      (t, toks) <- parsedFileLayoutIn2
+      let renamed = fromJust $ GHC.tm_renamed_source t
+
+      let Just (GHC.L l n) = locToName layoutIn2FileName (8, 7) renamed
+      let
+        comp = do
+         logm $ "renamed:" ++ (SYB.showData SYB.Renamer 0 renamed)
+
+         newName <- mkNewGhcName Nothing "listlonger"
+         new <- renamePN n newName True True renamed
+
+         return (new,newName)
+
+      ((nb,nn),s) <- runRefactGhc comp $ initialState { rsModule = initRefactModule t toks }
+      -- ((nb,nn),s) <- runRefactGhc comp $ initialLogOnState { rsModule = initRefactModule t toks }
+      (showGhc n) `shouldBe` "list"
+      (showToks $ [newNameTok False l nn]) `shouldBe` "[(((8,7),(8,17)),ITvarid \"listlonger\",\"listlonger\")]"
+      (GHC.showRichTokenStream $ toks) `shouldBe` "module LayoutIn2 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'list' to 'ls'.\n\n silly :: [Int] -> Int\n silly list = case list of  (1:xs) -> 1\n --There is a comment\n                            (2:xs)\n                              | x < 10    -> 4  where  x = last xs\n                            otherwise -> 12\n\n "
+      (GHC.showRichTokenStream $ toksFromState s) `shouldBe` "module LayoutIn2 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'list' to 'ls'.\n\n silly :: [Int] -> Int\n silly listlonger = case listlonger of  (1:xs) -> 1\n             --There is a comment\n                                        (2:xs)\n                                          | x < 10    -> 4  where  x = last xs\n                                        otherwise -> 12"
+      (unspace $ showGhc nb) `shouldBe` unspace "(LayoutIn2.silly :: [GHC.Types.Int] -> GHC.Types.Int\n LayoutIn2.silly listlonger\n = case listlonger of {\n (1 : xs) -> 1\n (2 : xs)\n | x GHC.Classes.< 10 -> 4\n where\n x = GHC.List.last xs\n otherwise -> 12 },\n [import (implicit) Prelude],\n Nothing,\n Nothing)"
+
+
+    ------------------------------------
+
+    it "realigns toks in a do for a shorter name" $ do
+      (t, toks) <- parsedFileLayoutIn4
+      let renamed = fromJust $ GHC.tm_renamed_source t
+
+      let Just (GHC.L l n) = locToName layoutIn4FileName (7, 8) renamed
+      let
+        comp = do
+         logm $ "renamed:" ++ (SYB.showData SYB.Renamer 0 renamed)
+
+         newName <- mkNewGhcName Nothing "io"
+         new <- renamePN n newName True True renamed
+
+         return (new,newName)
+
+      ((nb,nn),s) <- runRefactGhc comp $ initialState { rsModule = initRefactModule t toks }
+      -- ((nb,nn),s) <- runRefactGhc comp $ initialLogOnState { rsModule = initRefactModule t toks }
+      (showGhc n) `shouldBe` "ioFun"
+      (showToks $ [newNameTok False l nn]) `shouldBe` "[(((7,8),(7,10)),ITvarid \"io\",\"io\")]"
+      (GHC.showRichTokenStream $ toks) `shouldBe` "module LayoutIn4 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'ioFun' to  'io'\n\n main = ioFun \"hello\" where ioFun s= do  let  k = reverse s\n  --There is a comment\n                                         s <- getLine\n                                         let  q = (k ++ s)\n                                         putStr q\n                                         putStr \"foo\"\n\n "
+      (GHC.showRichTokenStream $ toksFromState s) `shouldBe` "module LayoutIn4 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'ioFun' to  'io'\n\n main = io \"hello\" where io s= do  let  k = reverse s\n--There is a comment\n                                   s <- getLine\n                                   let  q = (k ++ s)\n                                   putStr q\n                                   putStr \"foo\""
+      (unspace $ showGhc nb) `shouldBe` unspace "(LayoutIn4.main\n = io \"hello\"\n where\n io s\n = do { let k = GHC.List.reverse s;\n s <- System.IO.getLine;\n let q = (k GHC.Base.++ s);\n System.IO.putStr q;\n System.IO.putStr \"foo\" },\n [import (implicit) Prelude],\n Nothing,\n Nothing)"
+
+
+    ------------------------------------
+
+    it "realigns toks in a do for a longer name" $ do
+      (t, toks) <- parsedFileLayoutIn4
+      let renamed = fromJust $ GHC.tm_renamed_source t
+
+      let Just (GHC.L l n) = locToName layoutIn4FileName (7, 8) renamed
+      let
+        comp = do
+         logm $ "renamed:" ++ (SYB.showData SYB.Renamer 0 renamed)
+
+         newName <- mkNewGhcName Nothing "ioFunLong"
+         new <- renamePN n newName True True renamed
+
+         return (new,newName)
+
+      ((nb,nn),s) <- runRefactGhc comp $ initialState { rsModule = initRefactModule t toks }
+      -- ((nb,nn),s) <- runRefactGhc comp $ initialLogOnState { rsModule = initRefactModule t toks }
+      (showGhc n) `shouldBe` "ioFun"
+      (showToks $ [newNameTok False l nn]) `shouldBe` "[(((7,8),(7,17)),ITvarid \"ioFunLong\",\"ioFunLong\")]"
+      (GHC.showRichTokenStream $ toks) `shouldBe` "module LayoutIn4 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'ioFun' to  'io'\n\n main = ioFun \"hello\" where ioFun s= do  let  k = reverse s\n  --There is a comment\n                                         s <- getLine\n                                         let  q = (k ++ s)\n                                         putStr q\n                                         putStr \"foo\"\n\n "
+      (GHC.showRichTokenStream $ toksFromState s) `shouldBe` "module LayoutIn4 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'ioFun' to  'io'\n\n main = ioFunLong \"hello\" where ioFunLong s= do  let  k = reverse s\n          --There is a comment\n                                                 s <- getLine\n                                                 let  q = (k ++ s)\n                                                 putStr q\n                                                 putStr \"foo\""
+      (unspace $ showGhc nb) `shouldBe` unspace "(LayoutIn4.main\n = ioFunLong \"hello\"\n where\n ioFunLong s\n = do { let k = GHC.List.reverse s;\n s <- System.IO.getLine;\n let q = (k GHC.Base.++ s);\n System.IO.putStr q;\n System.IO.putStr \"foo\" },\n [import (implicit) Prelude],\n Nothing,\n Nothing)"
+
+    ------------------------------------
+
+    it "realigns toks in a where for a shorter name" $ do
+      (t, toks) <- parsedFileLayoutIn1
+      let renamed = fromJust $ GHC.tm_renamed_source t
+
+      let Just (GHC.L l n) = locToName layoutIn1FileName (7, 17) renamed
+      let
+        comp = do
+         logm $ "renamed:" ++ (SYB.showData SYB.Renamer 0 renamed)
+
+         newName <- mkNewGhcName Nothing "q"
+         new <- renamePN n newName True True renamed
+
+         return (new,newName)
+
+      ((nb,nn),s) <- runRefactGhc comp $ initialState { rsModule = initRefactModule t toks }
+      -- ((nb,nn),s) <- runRefactGhc comp $ initialLogOnState { rsModule = initRefactModule t toks }
+      (showGhc n) `shouldBe` "sq"
+      (showToks $ [newNameTok False l nn]) `shouldBe` "[(((7,17),(7,18)),ITvarid \"q\",\"q\")]"
+      (GHC.showRichTokenStream $ toks) `shouldBe` "module LayoutIn1 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'sq' to 'square'.\n\n sumSquares x y= sq x + sq y where sq x= x^pow\n   --There is a comment.\n                                   pow=2\n "
+      (GHC.showRichTokenStream $ toksFromState s) `shouldBe` "module LayoutIn1 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'sq' to 'square'.\n\n sumSquares x y= q x + q y where q x= x^pow\n --There is a comment.\n                                 pow=2"
+      (unspace $ showGhc nb) `shouldBe` unspace "(LayoutIn1.sumSquares x y\n = q x GHC.Num.+ q y\n where\n q x = x GHC.Real.^ pow\n pow = 2,\n [import (implicit) Prelude],\n Nothing,\n Nothing)"
+
+
+    ------------------------------------
+
+    it "realigns toks in a where for a longer name" $ do
+      (t, toks) <- parsedFileLayoutIn1
+      let renamed = fromJust $ GHC.tm_renamed_source t
+
+      let Just (GHC.L l n) = locToName layoutIn1FileName (7, 17) renamed
+      let
+        comp = do
+         logm $ "renamed:" ++ (SYB.showData SYB.Renamer 0 renamed)
+
+         newName <- mkNewGhcName Nothing "square"
+         new <- renamePN n newName True True renamed
+
+         return (new,newName)
+
+      ((nb,nn),s) <- runRefactGhc comp $ initialState { rsModule = initRefactModule t toks }
+      -- ((nb,nn),s) <- runRefactGhc comp $ initialLogOnState { rsModule = initRefactModule t toks }
+      (showGhc n) `shouldBe` "sq"
+      (showToks $ [newNameTok False l nn]) `shouldBe` "[(((7,17),(7,23)),ITvarid \"square\",\"square\")]"
+      (GHC.showRichTokenStream $ toks) `shouldBe` "module LayoutIn1 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'sq' to 'square'.\n\n sumSquares x y= sq x + sq y where sq x= x^pow\n   --There is a comment.\n                                   pow=2\n "
+      (GHC.showRichTokenStream $ toksFromState s) `shouldBe` "module LayoutIn1 where\n\n --Layout rule applies after 'where','let','do' and 'of'\n\n --In this Example: rename 'sq' to 'square'.\n\n sumSquares x y= square x + square y where square x= x^pow\n           --There is a comment.\n                                           pow=2"
+      (unspace $ showGhc nb) `shouldBe` unspace "(LayoutIn1.sumSquares x y\n = square x GHC.Num.+ square y\n where\n square x = x GHC.Real.^ pow\n pow = 2,\n [import (implicit) Prelude],\n Nothing,\n Nothing)"
+
+    ------------------------------------
+
+    it "realigns toks in a let/in for a shorter name" $ do
+      (t, toks) <- parsedFileLayoutLet1
+      let renamed = fromJust $ GHC.tm_renamed_source t
+
+      let Just (GHC.L l n) = locToName layoutLet1FileName (6, 6) renamed
+      let
+        comp = do
+         logm $ "renamed:" ++ (SYB.showData SYB.Renamer 0 renamed)
+
+         newName <- mkNewGhcName Nothing "x"
+         new <- renamePN n newName True True renamed
+
+         return (new,newName)
+
+      ((nb,nn),s) <- runRefactGhc comp $ initialState { rsModule = initRefactModule t toks }
+      -- ((nb,nn),s) <- runRefactGhc comp $ initialLogOnState { rsModule = initRefactModule t toks }
+      (showGhc n) `shouldBe` "xxx"
+      (showToks $ [newNameTok False l nn]) `shouldBe` "[(((6,5),(6,6)),ITvarid \"x\",\"x\")]"
+      (GHC.showRichTokenStream $ toks) `shouldBe` "module LayoutLet1 where\n\n -- Simple let expression, rename xxx to something longer or shorter\n -- and the let/in layout should adjust accordingly\n\n foo xxx = let a = 1\n               b = 2\n           in xxx + a + b\n\n "
+      (GHC.showRichTokenStream $ toksFromState s) `shouldBe` "module LayoutLet1 where\n\n -- Simple let expression, rename xxx to something longer or shorter\n -- and the let/in layout should adjust accordingly\n\n foo x = let a = 1\n             b = 2\n           in x + a + b"
+      (unspace $ showGhc nb) `shouldBe` unspace "(LayoutLet1.foo x\n = let\n a = 1\n b = 2\n in x GHC.Num.+ a GHC.Num.+ b,\n [import (implicit) Prelude],\n Nothing,\n Nothing)"
+
+    ------------------------------------
+
+    it "realigns toks in a let/in for a longer name 1" $ do
+      (t, toks) <- parsedFileLayoutLet1
+      let renamed = fromJust $ GHC.tm_renamed_source t
+
+      let Just (GHC.L l n) = locToName layoutLet1FileName (6, 6) renamed
+      let
+        comp = do
+         logm $ "renamed:" ++ (SYB.showData SYB.Renamer 0 renamed)
+
+         newName <- mkNewGhcName Nothing "xxxlong"
+         new <- renamePN n newName True True renamed
+
+         return (new,newName)
+
+      ((nb,nn),s) <- runRefactGhc comp $ initialState { rsModule = initRefactModule t toks }
+      -- ((nb,nn),s) <- runRefactGhc comp $ initialLogOnState { rsModule = initRefactModule t toks }
+      (showGhc n) `shouldBe` "xxx"
+      (showToks $ [newNameTok False l nn]) `shouldBe` "[(((6,5),(6,12)),ITvarid \"xxxlong\",\"xxxlong\")]"
+      (GHC.showRichTokenStream $ toks) `shouldBe` "module LayoutLet1 where\n\n -- Simple let expression, rename xxx to something longer or shorter\n -- and the let/in layout should adjust accordingly\n\n foo xxx = let a = 1\n               b = 2\n           in xxx + a + b\n\n "
+      (GHC.showRichTokenStream $ toksFromState s) `shouldBe` "module LayoutLet1 where\n\n -- Simple let expression, rename xxx to something longer or shorter\n -- and the let/in layout should adjust accordingly\n\n foo xxxlong = let a = 1\n                   b = 2\n           in xxxlong + a + b"
+      (unspace $ showGhc nb) `shouldBe` unspace "(LayoutLet1.foo xxxlong\n = let\n a = 1\n b = 2\n in xxxlong GHC.Num.+ a GHC.Num.+ b,\n [import (implicit) Prelude],\n Nothing,\n Nothing)"
+
+
+    ------------------------------------
+
+    it "realigns toks in a let/in for a longer name 2" $ do
+      (t, toks) <- parsedFileLayoutLet2
+      let renamed = fromJust $ GHC.tm_renamed_source t
+
+      let Just (GHC.L l n) = locToName layoutLet2FileName (7, 6) renamed
+      let
+        comp = do
+         logm $ "renamed:" ++ (SYB.showData SYB.Renamer 0 renamed)
+
+         newName <- mkNewGhcName Nothing "xxxlong"
+         new <- renamePN n newName True True renamed
+
+         return (new,newName)
+
+      ((nb,nn),s) <- runRefactGhc comp $ initialState { rsModule = initRefactModule t toks }
+      -- ((nb,nn),s) <- runRefactGhc comp $ initialLogOnState { rsModule = initRefactModule t toks }
+      (showGhc n) `shouldBe` "xxx"
+      (showToks $ [newNameTok False l nn]) `shouldBe` "[(((7,5),(7,12)),ITvarid \"xxxlong\",\"xxxlong\")]"
+      (GHC.showRichTokenStream $ toks) `shouldBe` "module LayoutLet2 where\n\n -- Simple let expression, rename xxx to something longer or shorter\n -- and the let/in layout should adjust accordingly\n -- In this case the tokens for xxx + a + b should also shift out\n\n foo xxx = let a = 1\n               b = 2 in xxx + a + b\n\n "
+      (GHC.showRichTokenStream $ toksFromState s) `shouldBe` "module LayoutLet1 where\n\n -- Simple let expression, rename xxx to something longer or shorter\n -- and the let/in layout should adjust accordingly\n\n foo xxxlong = let a = 1\n                   b = 2\n           in xxxlong + a + b"
+      (unspace $ showGhc nb) `shouldBe` unspace "(LayoutLet1.foo xxxlong\n = let\n a = 1\n b = 2\n in xxxlong GHC.Num.+ a GHC.Num.+ b,\n [import (implicit) Prelude],\n Nothing,\n Nothing)"
 
 
   -- ---------------------------------------------
@@ -3183,6 +3397,38 @@ layoutIn2FileName = GHC.mkFastString "./test/testdata/Renaming/LayoutIn2.hs"
 
 parsedFileLayoutIn2 :: IO (ParseResult, [PosToken])
 parsedFileLayoutIn2 = parsedFileGhc "./test/testdata/Renaming/LayoutIn2.hs"
+
+-- ----------------------------------------------------
+
+layoutLet1FileName :: GHC.FastString
+layoutLet1FileName = GHC.mkFastString "./test/testdata/TypeUtils/LayoutLet1.hs"
+
+parsedFileLayoutLet1 :: IO (ParseResult, [PosToken])
+parsedFileLayoutLet1 = parsedFileGhc "./test/testdata/TypeUtils/LayoutLet1.hs"
+
+-- ----------------------------------------------------
+
+layoutLet2FileName :: GHC.FastString
+layoutLet2FileName = GHC.mkFastString "./test/testdata/TypeUtils/LayoutLet2.hs"
+
+parsedFileLayoutLet2 :: IO (ParseResult, [PosToken])
+parsedFileLayoutLet2 = parsedFileGhc "./test/testdata/TypeUtils/LayoutLet2.hs"
+
+-- ----------------------------------------------------
+
+layoutIn1FileName :: GHC.FastString
+layoutIn1FileName = GHC.mkFastString "./test/testdata/Renaming/LayoutIn1.hs"
+
+parsedFileLayoutIn1 :: IO (ParseResult, [PosToken])
+parsedFileLayoutIn1 = parsedFileGhc "./test/testdata/Renaming/LayoutIn1.hs"
+
+-- ----------------------------------------------------
+
+layoutIn4FileName :: GHC.FastString
+layoutIn4FileName = GHC.mkFastString "./test/testdata/Renaming/LayoutIn4.hs"
+
+parsedFileLayoutIn4 :: IO (ParseResult, [PosToken])
+parsedFileLayoutIn4 = parsedFileGhc "./test/testdata/Renaming/LayoutIn4.hs"
 
 -- ----------------------------------------------------
 

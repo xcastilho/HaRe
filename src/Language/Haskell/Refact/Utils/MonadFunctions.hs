@@ -11,7 +11,6 @@ module Language.Haskell.Refact.Utils.MonadFunctions
        (
        -- * Conveniences for state access
 
-       -- * Original API provided
          fetchToksFinal
        , fetchOrigToks
        , fetchToks -- Deprecated
@@ -30,6 +29,7 @@ module Language.Haskell.Refact.Utils.MonadFunctions
        , replaceToken
        , putToksForSpan
        , getToksForSpan
+       , getToksForSpanNoInv
        , getToksBeforeSpan
        , putToksForPos
        , putToksAfterSpan
@@ -38,11 +38,7 @@ module Language.Haskell.Refact.Utils.MonadFunctions
        , removeToksForSpan
        , removeToksForPos
        , syncDeclToLatestStash
-
-       -- , putSrcSpan -- ^Make sure a SrcSpan is in the tree
-
-       -- , putNewSpanAndToks
-       -- , putNewPosAndToks
+       , indentDeclAndToks
 
        -- * For debugging
        , drawTokenTree
@@ -126,6 +122,23 @@ getToksForSpan sspan = do
   logm $ "getToksForSpan " ++ (showGhc sspan) ++ ":" ++ (show (showSrcSpanF sspan,toks))
   return toks
 
+-- |Get the current tokens for a given GHC.SrcSpan, without checking
+-- the invariant.
+-- TODO: this should not be necessary
+getToksForSpanNoInv ::  GHC.SrcSpan -> RefactGhc [PosToken]
+getToksForSpanNoInv sspan = do
+  st <- get
+  let checkInv = False
+  let Just tm = rsModule st
+  let forest = getTreeFromCache sspan (rsTokenCache tm)
+  let (forest',toks) = getTokensFor checkInv forest sspan
+  let tk' = replaceTreeInCache sspan forest' $ rsTokenCache tm
+  let rsModule' = Just (tm {rsTokenCache = tk'})
+  put $ st { rsModule = rsModule' }
+  logm $ "getToksForSpan " ++ (showGhc sspan) ++ ":" ++ (show (showSrcSpanF sspan,toks))
+  return toks
+
+
 -- |Get the current tokens preceding a given GHC.SrcSpan.
 getToksBeforeSpan ::  GHC.SrcSpan -> RefactGhc ReversedToks
 getToksBeforeSpan sspan = do
@@ -138,6 +151,7 @@ getToksBeforeSpan sspan = do
   put $ st { rsModule = rsModule' }
   logm $ "getToksBeforeSpan " ++ (showGhc sspan) ++ ":" ++ (show (showSrcSpanF sspan,toks))
   return toks
+
 
 -- |Replace a token occurring in a given GHC.SrcSpan
 replaceToken ::  GHC.SrcSpan -> PosToken -> RefactGhc ()
@@ -290,6 +304,24 @@ syncDeclToLatestStash t = do
 
 -- ---------------------------------------------------------------------
 
+-- | Indent an AST fragment and its associated tokens by a set amount
+indentDeclAndToks :: (SYB.Data t) => (GHC.Located t) -> Int -> RefactGhc (GHC.Located t)
+indentDeclAndToks t offset = do
+  let (GHC.L sspan _) = t
+  logm $ "indentDeclAndToks " ++ (showGhc sspan) ++ ":" ++ (showSrcSpanF sspan) ++ ",offset=" ++ show offset
+  st <- get
+  let Just tm = rsModule st
+  let tk = rsTokenCache tm
+  let forest = (tkCache tk) Map.! mainTid
+  let (t',forest') = indentDeclToks t forest offset
+  let tk' = tk {tkCache = Map.insert mainTid forest' (tkCache tk) }
+  let rsModule' = Just (tm {rsTokenCache = tk', rsStreamModified = True})
+  put $ st { rsModule = rsModule' }
+  drawTokenTree "indentDeclToks result"
+  return t'
+
+-- ---------------------------------------------------------------------
+
 getTypecheckedModule :: RefactGhc GHC.TypecheckedModule
 getTypecheckedModule = do
   mtm <- gets rsModule
@@ -392,8 +424,9 @@ logm string = do
   let loggingOn = (rsetVerboseLevel settings == Debug)
              --     || (rsetVerboseLevel settings == Normal)
   when loggingOn $ do
-     ts <- liftIO timeStamp
-     liftIO $ warningM "HaRe" (ts ++ ":" ++ string)
+     -- ts <- liftIO timeStamp
+     -- liftIO $ warningM "HaRe" (ts ++ ":" ++ string)
+     liftIO $ warningM "HaRe" (string)
   return ()
 
 timeStamp :: IO String

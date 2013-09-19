@@ -11,56 +11,57 @@
 -- modules, it should probably never be used directly in a refactoring.
 
 module Language.Haskell.Refact.Utils.TokenUtils(
-       -- * A token stream with last tokens first, and functions to
-       -- manipulate it
-         ReversedToks(..)
-       , reverseToks
-       , unReverseToks
-       , reversedToks
-       -- *
-       , Entry(..)
-       , Positioning(..)
-       , initTokenCache
-       , getTokensFor
-       , getTokensBefore
-       , replaceTokenForSrcSpan
-       , updateTokensForSrcSpan
-       , treeStartEnd
-       , spanStartEnd
-       , insertSrcSpan
-       , removeSrcSpan
-       , getSrcSpanFor
-       , retrieveTokensFinal
-       , retrieveTokensInterim
-       -- , retrieveTokens
-       , retrieveTokens' -- temporary for debug
-       , addNewSrcSpanAndToksAfter
-       , addToksAfterSrcSpan
-       , addDeclToksAfterSrcSpan
+       -- * Creating
+        initTokenCache
+       , mkTreeFromTokens
+       , mkTreeFromSpanTokens
 
-       -- * Token Tree Selection
-       , treeIdFromForestSpan
-       , replaceTokenInCache
+       -- * Operations at 'TokenCache' level
        , putToksInCache
+       , replaceTokenInCache
        , removeToksFromCache
        , getTreeFromCache
        , replaceTreeInCache
        , syncAstToLatestCache
 
+       -- * Operations at 'Tree' 'Entry' level
+       , getTokensFor
+       , getTokensBefore
+       , replaceTokenForSrcSpan
+       , updateTokensForSrcSpan
+       , insertSrcSpan
+       , removeSrcSpan
+       , getSrcSpanFor
+       , addNewSrcSpanAndToksAfter
+       , addToksAfterSrcSpan
+       , addDeclToksAfterSrcSpan
+       , syncAST
+       , indentDeclToks
+       , Positioning(..)
+
+       -- * Retrieving tokens
+       , retrieveTokensFinal
+       , retrieveTokensInterim
+       , retrieveTokens' -- temporary for debug
+
+       -- * Token Tree Selection
+       , treeIdFromForestSpan
+
        -- * Token marking and re-alignment
-       -- , tokenFileMark
-       -- , markToken
-       -- , isMarked
        , reAlignMarked
 
        -- * Utility
        , posToSrcSpan
        , posToSrcSpanTok
        , fileNameFromTok
+       , treeStartEnd
+       , spanStartEnd
 
-       -- * AST tie up
-       , syncAST
-
+       -- * A token stream with last tokens first, and functions to manipulate it
+       , ReversedToks(..)
+       , reverseToks
+       , unReverseToks
+       , reversedToks
 
        -- * Internal, for testing
        , placeToksForSpan
@@ -76,8 +77,6 @@ module Language.Haskell.Refact.Utils.TokenUtils(
        -- , lookupSrcSpan
        , invariantOk
        , invariant
-       , mkTreeFromTokens
-       , mkTreeFromSpanTokens
        , showForest
        , showTree
        , showSrcSpan
@@ -509,6 +508,12 @@ insertVersionsInForestSpan vsNew veNew ((ForestLine chs trs _vs ls,cs),(ForestLi
 
 -- ---------------------------------------------------------------------
 
+insertLenChangedInForestSpan :: Bool -> ForestSpan -> ForestSpan
+insertLenChangedInForestSpan chNew ((ForestLine _chs trs vs ls,cs),(ForestLine _che tre ve le,ce))
+  = ((ForestLine chNew trs vs ls,cs),(ForestLine chNew tre ve le,ce))
+
+-- ---------------------------------------------------------------------
+
 srcSpanToForestSpan :: GHC.SrcSpan -> ForestSpan
 srcSpanToForestSpan sspan = ((ghcLineToForestLine startRow,startCol),(ghcLineToForestLine endRow,endCol))
   where
@@ -520,6 +525,10 @@ srcSpanToForestSpan sspan = ((ghcLineToForestLine startRow,startCol),(ghcLineToF
 forestSpanFromEntry :: Entry -> ForestSpan
 forestSpanFromEntry (Entry ss _  ) = ss
 forestSpanFromEntry (Deleted ss _) = ss
+
+putForestSpanInEntry :: Entry -> ForestSpan -> Entry
+putForestSpanInEntry (Entry   _ss toks) ssnew = (Entry   ssnew toks)
+putForestSpanInEntry (Deleted _ss toks) ssnew = (Deleted ssnew toks)
 
 -- --------------------------------------------------------------------
 
@@ -548,7 +557,6 @@ initModule typeChecked tokens
 
 initTokenCache :: [PosToken] -> TokenCache
 initTokenCache toks = TK (Map.fromList [((TId 0),(mkTreeFromTokens toks))]) (TId 0)
-
 
 -- ---------------------------------------------------------------------
 
@@ -604,7 +612,6 @@ getTreeFromCache :: GHC.SrcSpan -> TokenCache -> Tree Entry
 getTreeFromCache sspan tk = (tkCache tk) Map.! tid
   where
     tid = treeIdFromForestSpan $ srcSpanToForestSpan sspan
-
 
 -- ---------------------------------------------------------------------
 
@@ -1735,7 +1742,10 @@ invariant forest = rsub
         -- test
         -- TODO: is this a reasonable approach?
 
-        rs = if (start <= sstart) && ((end >= send) || (forestPosVersionSet send) || (forestPosAstVersionSet send))
+        rs = if ((start <= sstart) &&
+                ((end >= send) || (forestPosVersionSet send) || (forestPosAstVersionSet send)))
+                || (forestPosLenChanged start)
+
                then []
                else ["FAIL: subForest start and end does not match entry: " ++ (prettyshow node)]
 
@@ -1875,12 +1885,8 @@ mkTreeFromTokens :: [PosToken] -> Tree Entry
 mkTreeFromTokens [] = Node (Entry nullSpan []) []
 mkTreeFromTokens toks = Node (Entry sspan toks) []
   where
-   -- startLoc = tokenPos $ ghead "mkTreeFromTokens" toks
-   -- endLoc   = tokenPosEnd $ last toks -- SrcSpans count from start of token, not end
-   -- sspan    = GHC.RealSrcSpan $ GHC.mkRealSrcSpan startLoc endLoc
    (startLoc',endLoc') = nonCommentSpan toks
    sspan    = simpPosToForestSpan (startLoc',endLoc')
-
 
 -- ---------------------------------------------------------------------
 
@@ -1897,20 +1903,15 @@ ghcSpanStartEnd sspan = (getGhcLoc sspan,getGhcLocEnd sspan)
 
 -- |Synchronise a located AST fragment to use a newly created SrcSpan
 -- in the token tree.
+-- TODO: Should this indent the tokens as well?
 syncAST :: (SYB.Data t)
   => GHC.Located t -- ^The AST (or fragment)
-  -- => t -- ^The AST (or fragment)
   -> GHC.SrcSpan   -- ^The SrcSpan created in the Tree Entry
   -> Tree Entry    -- ^Existing token tree
   -> (GHC.Located t, Tree Entry) -- ^Updated AST and tokens
-  -- -> (t, Tree Entry) -- ^Updated AST and tokens
--- syncAST (GHC.L _l t) sspan forest = (ast',forest')
 syncAST ast@(GHC.L l _t) sspan forest = (GHC.L sspan xx,forest')
   where
     forest' = forest
-
-    ((ForestLine _ _ _ startRow,startCol),_)       = srcSpanToForestSpan l
-    ((ForestLine _ _ _ newStartRow,newStartCol),_) = srcSpanToForestSpan sspan
 
     (( sr, sc),( _er, _ec)) = ghcSpanStartEnd l
     ((nsr,nsc),(_ner,_nec)) = ghcSpanStartEnd sspan
@@ -1918,14 +1919,9 @@ syncAST ast@(GHC.L l _t) sspan forest = (GHC.L sspan xx,forest')
     rowOffset = nsr - sr
     colOffset = nsc - sc
 
-    rowOffset' = newStartRow - startRow
-    colOffset' = newStartCol - startCol
-
     -- TODO: take cognizance of the ForestLines encoded in srcspans
     -- when calculating the offsets etc
     syncSpan s  = addOffsetToSpan (rowOffset,colOffset) s
-    syncSpan' s = addOffsetToSpan (rowOffset',colOffset') s
-    -- syncSpan s = s
 
     (GHC.L _s xx) = everywhereStaged SYB.Renamer (
               SYB.mkT hsbindlr
@@ -1935,19 +1931,75 @@ syncAST ast@(GHC.L l _t) sspan forest = (GHC.L sspan xx,forest')
               `SYB.extT` lhsexpr
               `SYB.extT` lpat
               `SYB.extT` limportdecl
+              `SYB.extT` lmatch
               ) ast
 
     hsbindlr (GHC.L s b)    = (GHC.L (syncSpan s) b) :: GHC.Located (GHC.HsBindLR GHC.Name GHC.Name)
     sig (GHC.L s n)         = (GHC.L (syncSpan s) n) :: GHC.LSig GHC.Name
     ty (GHC.L s typ)        = (GHC.L (syncSpan s) typ) :: (GHC.LHsType GHC.Name)
-
-    -- TODO: ++AZ++ this is horrible, ad hoc: syncSpan'
-    --name (GHC.L s n)        = (GHC.L (syncSpan' s) n) :: GHC.Located GHC.Name
     name (GHC.L s n)        = (GHC.L (syncSpan s) n) :: GHC.Located GHC.Name
-
     lhsexpr (GHC.L s e)     = (GHC.L (syncSpan s) e) :: GHC.LHsExpr GHC.Name
     lpat (GHC.L s p)        = (GHC.L (syncSpan s) p) :: GHC.LPat GHC.Name
     limportdecl (GHC.L s n) = (GHC.L (syncSpan s) n) :: GHC.LImportDecl GHC.Name
+    lmatch (GHC.L s m)      = (GHC.L (syncSpan s) m) :: GHC.LMatch GHC.Name
+
+-- ---------------------------------------------------------------------
+
+-- | indent the tree and tokens by the given offset, and sync the AST
+-- to the tree too.
+indentDeclToks :: (SYB.Data t)
+  => GHC.Located t -- ^The AST (or fragment)
+  -> Tree Entry    -- ^Existing token tree
+  -> Int           -- ^ (signed) number of columns to indent/dedent
+  -> (GHC.Located t, Tree Entry) -- ^Updated AST and tokens
+indentDeclToks decl@(GHC.L sspan _) forest offset = (decl',forest'')
+  where
+    -- make sure the span is in the forest
+    (forest',tree) = getSrcSpanFor forest (srcSpanToForestSpan sspan)
+
+    z = openZipperToSpan (srcSpanToForestSpan sspan) $ Z.fromTree forest'
+
+    tree' = go tree
+    -- The invariant will fail if we do not propagate this change
+    -- upward. But it needs to sync with the AST, which we do not have
+    -- the upward version of.
+    -- Instead, set the lengthChanged flag, in the parent.
+
+    -- sss = forestSpanFromEntry entry
+    -- sss' = insertLenChangedInForestSpan True sss
+    -- tree'' = Node (putForestSpanInEntry entry sss') subs
+
+    markLenChanged (Node entry subs) = (Node entry' subs)
+      where
+        sss = forestSpanFromEntry entry
+        sss' = insertLenChangedInForestSpan True sss
+        entry' = putForestSpanInEntry entry sss'
+
+    z' = Z.setTree tree' z
+    -- forest'' = Z.toTree (Z.setTree tree'' z)
+
+    forest'' = case Z.parent z' of
+                Nothing  -> Z.toTree (Z.setTree (markLenChanged $ Z.tree z' ) z' )
+                Just z'' -> Z.toTree (Z.setTree (markLenChanged $ Z.tree z'') z'')
+
+
+    (decl',_) = syncAST decl (addOffsetToSpan off sspan) tree
+
+    off = (0,offset)
+
+    -- Pretty sure this could be a fold of some kind
+    go (Node (Deleted ss eg) []) = (Node (Deleted (addOffsetToForestSpan off ss) eg) [])
+    go (Node (Entry ss []) sub)  = (Node (Entry (addOffsetToForestSpan off ss) []) (map go sub))
+    go (Node (Entry ss toks) []) = (Node (Entry (addOffsetToForestSpan off ss) (addOffsetToToks off toks)) [])
+
+-- ---------------------------------------------------------------------
+
+addOffsetToForestSpan :: (Int,Int) -> ForestSpan -> ForestSpan
+addOffsetToForestSpan (lineOffset,colOffset) fspan = fspan'
+  where
+    ((ForestLine sch str sv sl,sc),(ForestLine ech etr ev el,ec)) = fspan
+    fspan' = ((ForestLine sch str sv (sl+lineOffset),sc+colOffset),
+              (ForestLine ech etr ev (el+lineOffset),ec+colOffset))
 
 -- ---------------------------------------------------------------------
 
@@ -1976,6 +2028,7 @@ showSrcSpanF sspan = show (((chs,trs,vs,ls),cs),((che,tre,ve,le),ce))
     ((ForestLine chs trs vs ls,cs),(ForestLine che tre ve le,ce)) = srcSpanToForestSpan sspan
     -- chsn = if chs then 1 else 0
     -- chen = if che then 1 else 0
+
 
 -- ---------------------------------------------------------------------
 

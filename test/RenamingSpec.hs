@@ -300,7 +300,7 @@ spec = do
     it "Renames in LayoutIn1 7 17" $ do
      --     (["LayoutIn1.hs"],["square","7","17"]),
      r <- rename defaultTestSettings testCradle "./test/testdata/Renaming/LayoutIn1.hs" "square" (7,17)
-     -- rename logTestSettings testCradle Nothing "./test/testdata/Renaming/LayoutIn1.hs" "square" (7,17)
+     -- rename logTestSettings testCradle "./test/testdata/Renaming/LayoutIn1.hs" "square" (7,17)
      r `shouldBe` [ "./test/testdata/Renaming/LayoutIn1.hs"
                   ]
      diff <- compareFiles "./test/testdata/Renaming/LayoutIn1.hs.expected"
@@ -324,7 +324,7 @@ spec = do
     it "Renames in LayoutIn3 7 13" $ do
      --     (["LayoutIn3.hs"],["anotherX","7","13"]),
      r <- rename defaultTestSettings testCradle "./test/testdata/Renaming/LayoutIn3.hs" "anotherX" (7,13)
-     -- rename logTestSettings testCradle Nothing "./test/testdata/Renaming/LayoutIn3.hs" "anotherX" (7,13)
+     -- rename logTestSettings testCradle "./test/testdata/Renaming/LayoutIn3.hs" "anotherX" (7,13)
      r `shouldBe` [ "./test/testdata/Renaming/LayoutIn3.hs"
                   ]
      diff <- compareFiles "./test/testdata/Renaming/LayoutIn3.hs.expected"
@@ -336,7 +336,7 @@ spec = do
     it "Renames in LayoutIn4 7 8" $ do
      --     (["LayoutIn4.hs"],["io","7","8"])],
      r <- rename defaultTestSettings testCradle "./test/testdata/Renaming/LayoutIn4.hs" "io" (7,8)
-     -- rename logTestSettings testCradle Nothing "./test/testdata/Renaming/LayoutIn4.hs" "io" (7,8)
+     -- rename logTestSettings testCradle "./test/testdata/Renaming/LayoutIn4.hs" "io" (7,8)
      r `shouldBe` [ "./test/testdata/Renaming/LayoutIn4.hs"
                   ]
      diff <- compareFiles "./test/testdata/Renaming/LayoutIn4.hs.expected"
