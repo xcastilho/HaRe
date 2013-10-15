@@ -67,37 +67,18 @@ transact settings cradle args = do
 comp :: String -> SimpPos
      -> RefactGhc [ApplyRefacResult]	
 comp fileName (row, col) = do
-       --loadModuleGraphGhc maybeMainFile
-       --modInfo@(t, _tokList) <- getModuleGhc fileName
+
        getModuleGhc fileName
---     /== type checking ==\
---       checkedModule <- getTypecheckedModule
---       let typeChecked = GHC.tm_typechecked_source checkedModule
---     \== type checking ==/
        renamed <- getRefactRenamed
 
        -- 1) get variable name
-       --let pnt  = locToPNT (GHC.mkFastString fileName) (row, col) renamed
        let name = locToName (GHC.mkFastString fileName) (row, col) renamed
-       -- error (SYB.showData SYB.Parser 0 name)
 
        case name of
             (Just pn) -> do (refactoredMod, _) <- applyRefac (doTransact pn) (RSFile fileName)
                             return [refactoredMod]
             Nothing   -> error "Incorrect identifier selected!"
 
-       --if isFunPNT pnt mod    -- Add this back in ++ CMB +++
-       -- then do
-              --        rs <-if isExported pnt exps
-       --               then  applyRefacToClientMods (doSwap pnt) fileName
-       --               else  return []
-       -- writeRefactoredFiles False (r:rs)
-       -- else error "\nInvalid cursor position!"
-
-       -- putStrLn (showToks t)
-       -- writeRefactoredFiles False [refactoredMod]
-       -- putStrLn ("here" ++ (SYB.showData SYB.Parser 0 mod))  -- $ show [fileName, beginPos, endPos]
-       -- putStrLn "Completd"
 
 
 doTransact :: GHC.Located GHC.Name -> RefactGhc () 
@@ -113,16 +94,10 @@ doTransact name@(GHC.L s n) = do
 
     typechecked <- liftM GHC.tm_typechecked_source getTypecheckedModule -- >>= (return.GHC.tm_typechecked_source)
     reallyDoTransact name renamed typechecked
---    reallyDoTransact pnt name renamed
 
 
 reallyDoTransact :: GHC.Located GHC.Name -> GHC.RenamedSource -> GHC.TypecheckedSource-> RefactGhc ()
 reallyDoTransact name@(GHC.L s n1) renamed typechecked = do
---reallyDoTransact pnt@(PNT (GHC.L _ _)) name@(GHC.L s n1) renamed = do
-
-    -- TODO: Add import declaration for STM module, if it doesn't exists.
-    --newImports <- addImportDecl stmModuleName (renamedImports renamed)
-    --renamed' <- return $ changeImportsRenamed renamed newImports
 
     -- Commenting out the type signature changes, for now.
     -- Once I'm confident on the main workings of the refactoring,
@@ -209,7 +184,7 @@ reallyDoTransact name@(GHC.L s n1) renamed typechecked = do
          changeImportsRenamed (a, oldImports, c, d) newImports = (a, newImports, c, d)
 
          -- modifying the bindstatement
-         -- TODO: try to condense this two pattern-matches into one.
+         -- TODO: try to condense this two pattern-matches into one. +++ FMSSN +++
          inMod (bindSt@(GHC.BindStmt
             (GHC.L x (GHC.VarPat n2))
             oldf@(GHC.L y (GHC.HsVar nv)) z w )::(GHC.StmtLR GHC.Name GHC.Name))
@@ -294,9 +269,6 @@ reallyDoTransact name@(GHC.L s n1) renamed typechecked = do
                                 matches' <- updateMatches matches
                                 return (GHC.L x (GHC.Match (p1':p2':ps) nothing rhs):matches')
 
--- This was a simpler form to match HsExprs, but I think it was responsible 
--- for crashing the application. 
---instance Eq id => Eq (GHC.HsExpr id)
 
 newFuncName (GHC.L y (GHC.HsVar nv)) newf = return (GHC.L y (GHC.HsVar newf)) 
 
@@ -409,7 +381,7 @@ translateFunction n =
 --
 -- Author's note: I wrote this function top pattern match in one go, reloaded GHCi, 
 -- and it showed no errors. I gotta say I felt pretty proud about myself right then.
--- It ended up having a bug, but no compile-time errors!
+-- It ended up having a bug, but no compile-time errors! +++ FMSSN +++
 --        
 translateHsApp :: Bool -- ^ Is this function the topmost application? Deals with  
                        -- recursive HsApp's, as in functions with multiple arguments.
