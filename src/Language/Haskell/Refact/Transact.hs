@@ -75,7 +75,6 @@ comp fileName (row, col) = do
 --       let typeChecked = GHC.tm_typechecked_source checkedModule
 --     \== type checking ==/
        renamed <- getRefactRenamed
-       parsed  <- getRefactParsed
 
        -- 1) get variable name
        --let pnt  = locToPNT (GHC.mkFastString fileName) (row, col) renamed
@@ -83,7 +82,7 @@ comp fileName (row, col) = do
        -- error (SYB.showData SYB.Parser 0 name)
 
        case name of
-            (Just pn) -> do (refactoredMod@(_, (t, s)), _) <- applyRefac (doTransact pn) (RSFile fileName)
+            (Just pn) -> do (refactoredMod, _) <- applyRefac (doTransact pn) (RSFile fileName)
                             return [refactoredMod]
             Nothing   -> error "Incorrect identifier selected!"
 
@@ -103,9 +102,7 @@ comp fileName (row, col) = do
 
 doTransact :: GHC.Located GHC.Name -> RefactGhc () 
 doTransact name@(GHC.L s n) = do
-    inscopes <- getRefactInscopes
     renamed  <- getRefactRenamed
-    parsed   <- getRefactParsed
 
     -- try adding the import declaration at this point
 
