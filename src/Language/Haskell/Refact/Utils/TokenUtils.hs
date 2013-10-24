@@ -26,6 +26,7 @@ module Language.Haskell.Refact.Utils.TokenUtils(
 
        -- * Operations at 'Tree' 'Entry' level
        , getTokensFor
+       , getTokensForNoIntros
        , getTokensBefore
        , replaceTokenForSrcSpan
        , updateTokensForSrcSpan
@@ -448,11 +449,13 @@ showForestSpan ((sr,sc),(er,ec))
 
 -- ---------------------------------------------------------------------
 
+-- | Replace any ForestLine flags already in a SrcSpan with the given ones
 insertForestLineInSrcSpan :: ForestLine -> GHC.SrcSpan -> GHC.SrcSpan
 insertForestLineInSrcSpan fl@(ForestLine ch tr v _l) (GHC.RealSrcSpan ss) = ss'
   where
     lineStart = forestLineToGhcLine fl
-    lineEnd   = forestLineToGhcLine (ForestLine ch tr v (GHC.srcSpanEndLine ss))
+    (_,(ForestLine _ _ _ le,_)) = srcSpanToForestSpan (GHC.RealSrcSpan ss)
+    lineEnd   = forestLineToGhcLine (ForestLine ch tr v le)
     locStart = GHC.mkSrcLoc (GHC.srcSpanFile ss) lineStart (GHC.srcSpanStartCol ss)
     locEnd   = GHC.mkSrcLoc (GHC.srcSpanFile ss) lineEnd   (GHC.srcSpanEndCol ss)
     ss' = GHC.mkSrcSpan locStart locEnd
@@ -653,8 +656,6 @@ syncAstToLatestCache tk t = t'
 -- |Get the (possible cached) tokens for a given source span, and
 -- cache their being fetched.
 -- NOTE: The SrcSpan may be one introduced by HaRe, rather than GHC.
--- TODO: consider returning an Either. Although in reality the error
---       should never happen
 getTokensFor :: Bool -> Tree Entry -> GHC.SrcSpan -> (Tree Entry,[PosToken])
 getTokensFor checkInvariant forest sspan = (forest'', tokens)
   where
@@ -665,6 +666,19 @@ getTokensFor checkInvariant forest sspan = (forest'', tokens)
      (forest'',tree) = getSrcSpanFor forest' (srcSpanToForestSpan sspan)
 
      tokens = retrieveTokensInterim tree
+
+-- ---------------------------------------------------------------------
+
+-- |Get the (possible cached) tokens for a given source span, and
+-- cache their being fetched.
+-- NOTE: The SrcSpan may be one introduced by HaRe, rather than GHC.
+getTokensForNoIntros :: Bool -> Tree Entry -> GHC.SrcSpan -> (Tree Entry,[PosToken])
+getTokensForNoIntros checkInvariant forest sspan = (forest', tokens')
+  where
+    (forest',tokens) = getTokensFor checkInvariant forest sspan
+    -- (lead,rest) = break (not . isWhiteSpaceOrIgnored) tokens
+    (lead,rest) = break (not . isIgnoredNonComment) tokens
+    tokens' = (filter (not . isIgnored) lead) ++ rest
 
 -- ---------------------------------------------------------------------
 
@@ -725,8 +739,11 @@ updateTokensForSrcSpan forest sspan toks = (forest'',newSpan,oldTree)
     (forest',tree@(Node (Entry _s _) _)) = getSrcSpanFor forest (srcSpanToForestSpan sspan)
     prevToks = retrieveTokensInterim tree
 
-    endComments = reverse $ takeWhile isWhiteSpace $ reverse toks
-    startComments = takeWhile isWhiteSpace $ toks
+    -- endComments = reverse $ takeWhile isWhiteSpace $ reverse toks
+    -- startComments = takeWhile isWhiteSpace $ toks
+
+    endComments   = reverse $ takeWhile isWhiteSpaceOrIgnored $ reverse toks
+    startComments = takeWhile isWhiteSpaceOrIgnored $ toks
 
     newTokStart = if (emptyList prevToks)
                    then mkZeroToken
@@ -738,9 +755,13 @@ updateTokensForSrcSpan forest sspan toks = (forest'',newSpan,oldTree)
       else -- Must reuse any pre-existing start or end comments, and
            -- resync the tokens across all three.
         let
-           origEndComments = reverse $ takeWhile isWhiteSpace $ reverse prevToks
-           origStartComments = takeWhile isWhiteSpace $ prevToks
-           core = reIndentToks (PlaceAbsolute (tokenRow newTokStart) (tokenCol newTokStart)) prevToks toks
+           -- origEndComments = reverse $ takeWhile isWhiteSpace $ reverse prevToks
+           -- origStartComments = takeWhile isWhiteSpace $ prevToks
+           origEndComments   = reverse $ takeWhile isWhiteSpaceOrIgnored $ reverse prevToks
+           origStartComments = takeWhile isWhiteSpaceOrIgnored $ prevToks
+           -- core = reIndentToks (PlaceAbsolute (tokenRow newTokStart) (tokenCol newTokStart)) prevToks toks
+           ((startRow,startCol),_) = forestSpanToGhcPos $ srcSpanToForestSpan sspan
+           core = reIndentToks (PlaceAbsolute startRow startCol) prevToks toks
            trail = if (emptyList origEndComments)
             then []
             else addOffsetToToks (lineOffset,colOffset) origEndComments
@@ -807,11 +828,13 @@ insertSrcSpan forest sspan = forest'
             (startLoc,endLoc) = startEndLocIncComments' toks (tokStartPos,tokEndPos)
 
             (startToks,middleToks,endToks) = splitToks (startLoc,endLoc) toks
-            tree1 = if (emptyList $ filter (\t -> not $ isEmpty t) startToks)
+            -- tree1 = if (emptyList $ filter (\t -> not $ isEmpty t) startToks)
+            tree1 = if (nonCommentSpan startToks == ((0,0),(0,0)))
                        then []
                        else [mkTreeFromTokens startToks]
             tree2 = [mkTreeFromSpanTokens sspan middleToks]
-            tree3 = if (emptyList $ filter (\t -> not $ isEmpty t) endToks)
+            -- tree3 = if (emptyList $ filter (\t -> not $ isEmpty t) endToks)
+            tree3 = if (nonCommentSpan endToks == ((0,0),(0,0)))
                        then []
                        else [mkTreeFromTokens endToks]
 
@@ -882,43 +905,46 @@ doSplitTree tree                             sspan = (b'',m'',e'')
 
 -- ---------------------------------------------------------------------
 
-mkTreeListFromTokens :: [PosToken] -> ForestSpan -> [Tree Entry]
-mkTreeListFromTokens  [] _sspan = []
-mkTreeListFromTokens toks sspan = res
+-- TODO: The Bool is horrible
+mkTreeListFromTokens :: [PosToken] -> ForestSpan -> Bool -> [Tree Entry]
+mkTreeListFromTokens  [] _sspan _ = []
+mkTreeListFromTokens toks sspan useOriginalSpan = res
   where
    (Node (Entry tspan treeToks) sub) = mkTreeFromTokens toks
 
    ((ForestLine chs ts vs  _, _),(ForestLine che te ve  _, _)) = sspan
    ((ForestLine   _  _  _ ls,cs),(ForestLine   _  _  _ le,ce)) = tspan
 
-   span' = ((ForestLine chs ts vs ls, cs),(ForestLine che te ve  le, ce))
+   span' = ((ForestLine chs ts vs ls, cs),(ForestLine che te ve le, ce))
 
-   res = if ((ls,cs),(le,ce)) == ((0,0),(0,0))
+   res = if nonCommentSpan toks == ((0,0),(0,0))
      then []
-     else [(Node (Entry span' treeToks) sub)]
+     else if useOriginalSpan
+            then [(Node (Entry sspan treeToks) sub)]
+            else [(Node (Entry span' treeToks) sub)]
 
+-- ---------------------------------------------------------------------
 
 splitSubToks ::
   Tree Entry
   -> (ForestPos, ForestPos)
   -> ([Tree Entry], [Tree Entry], [Tree Entry])
-splitSubToks n@(Node (Deleted (ssStart,ssEnd) _eg) []) (sspanStart,sspanEnd) = (b',m',e')
+splitSubToks n@(Node (Deleted (treeStart,treeEnd) _eg) []) (sspanStart,sspanEnd) = (b',m',e')
   where
     egs = (0,0) -- TODO: calculate this
     ege = (0,0) -- TODO: calculate this
-    b' = if sspanStart > ssStart
-           then [Node (Deleted (ssStart,ssStart) egs) []]
-           -- then error $ "splitSubToks:would return:b'=" ++ (show [Node (Deleted (ssStart,ssStart) egs) []]) -- ++AZ++
+    b' = if sspanStart > treeStart
+           then [Node (Deleted (treeStart,treeStart) egs) []]
            else []
     m' = [n]
-    e' = if ssEnd > sspanEnd
-           then [Node (Deleted (sspanEnd,ssEnd) ege) []]
-           -- then error $ "splitSubToks:would return:e'=" ++ (show [Node (Deleted (sspanEnd,ssEnd) ege) []]) -- ++AZ++
+    e' = if treeEnd > sspanEnd
+           then [Node (Deleted (sspanEnd,treeEnd) ege) []]
            else []
+
 splitSubToks tree sspan = (b',m',e')
                           -- error $ "splitSubToks:(sspan,tree)=" ++ (show (sspan,tree))
   where
-    (Node (Entry ss@(ssStart,ssEnd) toks)  []) = tree
+    (Node (Entry ss@(treeStart,treeEnd) toks)  []) = tree
     (sspanStart,sspanEnd) = sspan
     -- TODO: ignoring comment boundaries to start
 
@@ -931,21 +957,16 @@ splitSubToks tree sspan = (b',m',e')
                        -- error $ "splitSubToks:StartOnly:(sspan,tree,(b'',m''))=" ++ (show (sspan,tree,(b'',m'')))
         where
          (_,toksb,toksm) = splitToks (forestSpanToSimpPos (nullPos,sspanStart)) toks
---         b'' = if (emptyList toksb) then [] else [Node (Entry (ssStart, sspanEnd) toksb) []]
-         b'' = if (emptyList toksb) then [] else [mkTreeFromTokens toksb] -- Need to get end from actual toks
-{-
-         m'' = if (ssStart == sspanStart) -- Eq does not compare all flags
-                    then mkTreeListFromTokens toksm (ssStart,   ssEnd)
-                    else mkTreeListFromTokens toksm (sspanStart,ssEnd)
--}
+--         b'' = if (emptyList toksb) then [] else [Node (Entry (treeStart, sspanEnd) toksb) []]
+         b'' = if (emptyList toksb || nonCommentSpan toksb == ((0,0),(0,0)))
+                 then []
+                 else [mkTreeFromTokens toksb] -- Need to get end from actual toks
          m'' = let
-                -- ssStart, ssEnd is passed in node
-                -- sspanStart, sspanEnd is span we are matching
                 (ForestLine _ch _ts _v le,ce) = sspanEnd
                 tl =
-                  if (ssStart == sspanStart) -- Eq does not compare all flags
-                    then mkTreeListFromTokens toksm (ssStart,   ssEnd)
-                    else mkTreeListFromTokens toksm (sspanStart,ssEnd)
+                  if (treeStart == sspanStart) -- Eq does not compare all flags
+                    then mkTreeListFromTokens toksm (treeStart, treeEnd) False
+                    else mkTreeListFromTokens toksm (sspanStart,treeEnd) False
                 _tl' = if emptyList tl
                  then []
                  else [Node (Entry (st,(ForestLine ch ts v le,ce)) tk) []]
@@ -954,26 +975,30 @@ splitSubToks tree sspan = (b',m',e')
                 -- tl'
                 tl
          e'' = []
+
       (True, True) -> (b'',m'',e'') -- Start and End
         where
-         (toksb,toksm,tokse) = splitToks (forestSpanToSimpPos (ssStart,ssEnd)) toks
-         b'' = mkTreeListFromTokens toksb (sspanStart,ssStart)
-         m'' = mkTreeListFromTokens toksm (ssStart,ssEnd)
-         e'' = mkTreeListFromTokens tokse (ssEnd,sspanEnd)
+         -- (toksb,toksm,tokse) = splitToks (forestSpanToSimpPos (treeStart,treeEnd)) toks
+         (toksb,toksm,tokse) = splitToks (forestSpanToSimpPos (sspanStart,sspanEnd)) toks
+         b'' = mkTreeListFromTokens toksb (treeStart,  sspanStart) False
+         m'' = mkTreeListFromTokens toksm (sspanStart, sspanEnd)   True
+         e'' = mkTreeListFromTokens tokse (sspanEnd,   treeEnd)    False
+
       (False,True) -> (b'',m'',e'') -- End only
         where
          (_,toksm,tokse) = splitToks (forestSpanToSimpPos (nullPos,sspanEnd)) toks
          b'' = []
          m'' = let -- If the last span is changed, make sure it stays
                    -- as it was
-                tl = mkTreeListFromTokens toksm (ssStart,sspanEnd)
+                tl = mkTreeListFromTokens toksm (treeStart,sspanEnd) False
                 tl' = if emptyList tl
                  then []
                  else [Node (Entry (st,sspanEnd) tk) []]
-                   where [Node (Entry (st,_en) tk) []] = mkTreeListFromTokens toksm (ssStart,sspanEnd)
+                   where [Node (Entry (st,_en) tk) []] = mkTreeListFromTokens toksm (treeStart,sspanEnd) False
                 in
                  tl'
-         e'' = mkTreeListFromTokens tokse (sspanEnd,ssEnd)
+         e'' = mkTreeListFromTokens tokse (sspanEnd,treeEnd) False
+
       (False,False) -> if (containsMiddle ss sspan)
                         then ([],[tree],[])
                         else error $ "splitSubToks: error (ss,sspan)=" ++ (show (ss,sspan))
@@ -1085,7 +1110,7 @@ calcEndGap tree sspan = gap
 -- |Retrieve all the tokens at the leaves of the tree, in order.
 -- Marked tokens are re-aligned, and gaps are closed.
 retrieveTokensFinal :: Tree Entry -> [PosToken]
-retrieveTokensFinal forest = stripForestLines $ monotonicLineToks $ reAlignMarked
+retrieveTokensFinal forest = monotonicLineToks $ stripForestLines $ reAlignMarked
                       $ deleteGapsToks $ retrieveTokens' forest
 
 -- ---------------------------------------------------------------------
@@ -1093,7 +1118,7 @@ retrieveTokensFinal forest = stripForestLines $ monotonicLineToks $ reAlignMarke
 -- |Retrieve all the tokens at the leaves of the tree, in order. No
 -- adjustments are made to address gaps or re-alignment of the tokens
 retrieveTokensInterim :: Tree Entry -> [PosToken]
-retrieveTokensInterim forest = stripForestLines $ monotonicLineToks {-  reAlignMarked -}
+retrieveTokensInterim forest = monotonicLineToks $ stripForestLines {-  reAlignMarked -}
                              $ concat $ map (\t -> F.foldl accum [] t) [forest]
   where
     accum :: [PosToken] -> Entry -> [PosToken]
@@ -1430,7 +1455,7 @@ reIndentToks pos prevToks toks = toks''
         where
           -- TODO: Should this not be prevOffset?
           colStart  = tokenCol $ ghead "reIndentToks.4"
-                    $ dropWhile isWhiteSpace prevToks
+                    $ dropWhile isWhiteSpaceOrIgnored prevToks
           -- colStart = prevOffset
           -- colStart = error $ "reIndentToks:prevToks=" ++ (show prevToks)
           lineStart = (tokenRow (lastTok)) -- + 1
@@ -1461,13 +1486,16 @@ nonCommentSpan :: [PosToken] -> (SimpPos,SimpPos)
 nonCommentSpan [] = ((0,0),(0,0))
 nonCommentSpan toks = (startPos,endPos)
   where
-    stripped = dropWhile isWhiteSpace $ toks
+    -- stripped = dropWhile isWhiteSpace $ toks
+    stripped = dropWhile isIgnoredNonComment $ toks
     (startPos,endPos) = case stripped of
       [] -> ((0,0),(0,0))
       _ -> (tokenPos startTok,tokenPosEnd endTok)
        where
-        startTok = ghead "nonCommentSpan.1" $ dropWhile isWhiteSpace $ toks
-        endTok   = ghead "nonCommentSpan.2" $ dropWhile isWhiteSpace $ reverse toks
+        -- startTok = ghead "nonCommentSpan.1" $ dropWhile isWhiteSpace $ toks
+        -- endTok   = ghead "nonCommentSpan.2" $ dropWhile isWhiteSpace $ reverse toks
+        startTok = ghead "nonCommentSpan.1" $ dropWhile isIgnoredNonComment $ toks
+        endTok   = ghead "nonCommentSpan.2" $ dropWhile isIgnoredNonComment $ reverse toks
 
 -- ---------------------------------------------------------------------
 
@@ -1882,11 +1910,13 @@ prettyToks toks = showToks [ghead "prettyToks" toks] ++ ".." ++ showToks [last t
 
 -- |Make a tree representing a particular set of tokens
 mkTreeFromTokens :: [PosToken] -> Tree Entry
-mkTreeFromTokens [] = Node (Entry nullSpan []) []
+mkTreeFromTokens []   = Node (Entry nullSpan []) []
 mkTreeFromTokens toks = Node (Entry sspan toks) []
   where
    (startLoc',endLoc') = nonCommentSpan toks
-   sspan    = simpPosToForestSpan (startLoc',endLoc')
+   sspan    = if (startLoc',endLoc') == ((0,0),(0,0))
+     then error $ "mkTreeFromTokens:null span for:" ++ (show toks)
+     else simpPosToForestSpan (startLoc',endLoc')
 
 -- ---------------------------------------------------------------------
 

@@ -1,6 +1,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Language.Haskell.Refact.Utils.Monad
@@ -23,20 +24,24 @@ module Language.Haskell.Refact.Utils.Monad
 
        ) where
 
-import Control.Monad.State
-import Exception
-import qualified Control.Monad.IO.Class as MU
 
 import qualified GHC           as GHC
 import qualified GHC.Paths     as GHC
 import qualified GhcMonad      as GHC
 import qualified MonadUtils    as GHC
 
+import Control.Monad.State
 import Data.List
+-- import Data.Maybe
+import Exception
 import Language.Haskell.GhcMod
 import Language.Haskell.GhcMod.Internal
 import Language.Haskell.Refact.Utils.TokenUtilsTypes
 import Language.Haskell.Refact.Utils.TypeSyn
+-- import System.Directory
+-- import System.FilePath
+-- import System.Log.Logger
+import qualified Control.Monad.IO.Class as MU
 
 -- ---------------------------------------------------------------------
 
@@ -47,15 +52,27 @@ data RefactSettings = RefSet
         { rsetGhcOpts      :: ![String]
         , rsetImportPaths :: ![FilePath]
         , rsetExpandSplice :: Bool
+        , rsetLineSeparator :: LineSeparator
         , rsetMainFile     :: Maybe FilePath
-        -- | The sandbox directory.
-        , rsetSandbox      :: Maybe FilePath
         , rsetCheckTokenUtilsInvariant :: !Bool
         , rsetVerboseLevel :: !VerboseLevel
+        , rsetEnabledTargets :: (Bool,Bool,Bool,Bool)
         } deriving (Show)
 
+deriving instance Show LineSeparator
+
+
 defaultSettings :: RefactSettings
-defaultSettings = RefSet [] [] False Nothing Nothing False Normal
+defaultSettings = RefSet
+    { rsetGhcOpts = []
+    , rsetImportPaths = []
+    , rsetExpandSplice = False
+    , rsetLineSeparator = LineSeparator "\0"
+    , rsetMainFile = Nothing
+    , rsetCheckTokenUtilsInvariant = False
+    , rsetVerboseLevel = Normal
+    , rsetEnabledTargets = (True,False,True,False)
+    }
 
 logSettings :: RefactSettings
 logSettings = defaultSettings { rsetVerboseLevel = Debug }
@@ -134,24 +151,6 @@ instance (MonadPlus m,Functor m,GHC.MonadIO m,ExceptionMonad m) => MonadPlus (GH
 
 -- | Initialise the GHC session, when starting a refactoring.
 --   This should never be called directly.
-{-
-initGhcSession :: RefactGhc ()
-initGhcSession = do
-      settings <- getRefacSettings
-      dflags   <- GHC.getSessionDynFlags
-      let dflags' = foldl GHC.xopt_set dflags
-                    [GHC.Opt_Cpp, GHC.Opt_ImplicitPrelude, GHC.Opt_MagicHash
-                    ]
-          dflags'' = dflags' { GHC.importPaths = rsetImportPath settings }
-
-          -- Enable GHCi style in-memory linking
-          dflags''' = dflags'' { GHC.hscTarget = GHC.HscInterpreted,
-                                 GHC.ghcLink   = GHC.LinkInMemory }
-
-      _ <- GHC.setSessionDynFlags dflags'''
-      return ()
--}
-
 initGhcSession :: Cradle -> [FilePath] -> RefactGhc ()
 initGhcSession cradle importDirs = do
     settings <- getRefacSettings
@@ -166,14 +165,33 @@ initGhcSession cradle importDirs = do
                  , operators = False
                  , detailed = False
                  , expandSplice = False
-                 , sandbox = (rsetSandbox settings)
-                 , lineSeparator = LineSeparator "\n"
+                 , lineSeparator = rsetLineSeparator settings
                  }
-    _readLog <- initializeFlagsWithCradle opt cradle (options settings) True
-    -- setTargetFile fileNames
-    -- checkSlowAndSet
-    void $ GHC.load GHC.LoadAllTargets
-    -- liftIO readLog
+    (_readLog,mcabal) <- initializeFlagsWithCradle opt cradle (options settings) True
+
+    case mcabal of
+      Just cabal -> do
+        targets <- liftIO $ cabalAllTargets cabal
+        -- liftIO $ warningM "HaRe" $ "initGhcSession:targets=" ++ show targets
+
+        -- TODO: Cannot load multiple main modules, must try to load
+        -- each main module and retrieve its module graph, and then
+        -- set the targets to this superset.
+
+        let targets' = getEnabledTargets settings targets
+        -- let (libt,exet,testt,bencht) = targets
+        -- case libt ++ exet ++ testt ++ bencht of
+        -- case libt {- ++ exet -} ++ testt ++ bencht of
+        case targets' of
+          [] -> return ()
+          tgts -> do
+                     -- liftIO $ warningM "HaRe" $ "initGhcSession:tgts=" ++ (show tgts)
+                     setTargetFiles tgts
+                     checkSlowAndSet
+                     void $ GHC.load GHC.LoadAllTargets
+
+      Nothing -> return()
+
     return ()
     where
       options opt
@@ -191,6 +209,19 @@ getRefacSettings :: RefactGhc RefactSettings
 getRefacSettings = do
   s <- get
   return (rsSettings s)
+
+-- ---------------------------------------------------------------------
+
+getEnabledTargets :: RefactSettings -> ([FilePath],[FilePath],[FilePath],[FilePath]) -> [FilePath]
+getEnabledTargets settings (libt,exet,testt,bencht) = targets
+  where
+    (libEnabled, exeEnabled, testEnabled, benchEnabled) = rsetEnabledTargets settings
+    targets = on libEnabled libt
+           ++ on exeEnabled exet
+           ++ on testEnabled testt
+           ++ on benchEnabled bencht
+
+    on flag xs = if flag then xs else []
 
 -- ---------------------------------------------------------------------
 -- ++AZ++ trying to wrap this in GhcT, or vice versa

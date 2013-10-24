@@ -2348,21 +2348,19 @@ instance UsedByRhs HsModuleP where
 -- (row,col) in the file specified by the fileName, and returns
 -- `Nothing` if such an identifier does not exist.
 locToName::(SYB.Data t)
-                    =>GHC.FastString   -- ^ The file name
-                    ->SimpPos          -- ^ The row and column number
+                    =>SimpPos          -- ^ The row and column number
                     ->t                -- ^ The syntax phrase
                     -> Maybe (GHC.Located GHC.Name)  -- ^ The result
-locToName fileName (row,col) t = locToName' SYB.Renamer fileName (row,col) t
+locToName (row,col) t = locToName' SYB.Renamer (row,col) t
 
 -- |Find the identifier(in GHC.RdrName format) whose start position is
 -- (row,col) in the file specified by the fileName, and returns
 -- `Nothing` if such an identifier does not exist.
 locToRdrName::(SYB.Data t)
-                    =>GHC.FastString   -- ^ The file name
-                    ->SimpPos          -- ^ The row and column number
+                    =>SimpPos          -- ^ The row and column number
                     ->t                -- ^ The syntax phrase
                     -> Maybe (GHC.Located GHC.RdrName)  -- ^ The result
-locToRdrName fileName (row,col) t = locToName' SYB.Parser fileName (row,col) t
+locToRdrName (row,col) t = locToName' SYB.Parser (row,col) t
 
 
 -- |Worker for both locToName and locToRdrName.
@@ -2370,11 +2368,10 @@ locToRdrName fileName (row,col) t = locToName' SYB.Parser fileName (row,col) t
 -- retained in the AST
 locToName'::(SYB.Data t, SYB.Data a, Eq a,GHC.Outputable a)
                     =>SYB.Stage
-                    ->GHC.FastString   -- ^ The file name
                     ->SimpPos          -- ^ The row and column number
                     ->t                -- ^ The syntax phrase
                     -> Maybe (GHC.Located a)  -- ^ The result
-locToName' stage fileName (row,col) t =
+locToName' stage (row,col) t =
       if res1 /= Nothing
         then res1
         else res2
@@ -2451,7 +2448,7 @@ locToName' stage fileName (row,col) t =
           case l of
             (GHC.UnhelpfulSpan _) -> False
             (GHC.RealSrcSpan ss)  ->
-              (GHC.srcSpanFile ss == fileName) &&
+              -- (GHC.srcSpanFile ss == fileName) &&
               (GHC.srcSpanStartLine ss <= row) &&
               (GHC.srcSpanEndLine ss   >= row) &&
               (col >= (GHC.srcSpanStartCol ss)) &&
@@ -3424,8 +3421,10 @@ rmDecl:: (SYB.Data t)
                                    -- siganture
 rmDecl pn incSig t = do
   logm $ "rmDecl:(pn,incSig)= " ++ (showGhc (pn,incSig)) -- ++AZ++
+  -- drawTokenTreeDetailed "rmDecl.entry tree" -- ++AZ++ 'in' present
   setStateStorage StorageNone
   t2  <- everywhereMStaged' SYB.Renamer (SYB.mkM inLet) t -- top down
+  drawTokenTreeDetailed "rmDecl.entry after inLet" -- ++AZ++ 'in' missing
   t'  <- everywhereMStaged' SYB.Renamer (SYB.mkM inDecls `SYB.extM` inGRHSs) t2 -- top down
 
              -- applyTP (once_tdTP (failTP `adhocTP` inDecls)) t
@@ -3477,17 +3476,22 @@ rmDecl pn incSig t = do
          let (decls1, decls2) = break (defines pn) decls
              decl = ghead "rmDecl" decls2
 
+         -- drawTokenTreeDetailed "rmDecl.inLet tree" -- ++AZ++ present
          toks <- getToksForSpan l
+         -- drawTokenTreeDetailed "rmDecl.inLet tree" -- ++AZ++ missing
+         -- toks <- getToksForSpanWithIntros l
          removeToksForPos (getStartEndLoc decl)
          decl' <- syncDeclToLatestStash decl
          setStateStorage (StorageBind decl')
          case length decls of
-           1 -> do
+           1 -> do -- Removing the last declaration
             logm $ "rmDecl.inLet:length decls = 1: expr=" ++ (SYB.showData SYB.Renamer 0 expr)
-            putToksForSpan ss toks
+            -- putToksForSpan ss toks
+            putToksForSpan ss $ dropWhile (\tok -> isEmpty tok || isIn tok) toks
             return expr
            _ -> do
             logm $ "rmDecl.inLet:length decls /= 1"
+            -- drawTokenTreeDetailed "rmDecl.inLet tree"
             let decls2' = gtail "inLet" decls2
             return $ (GHC.L ss (GHC.HsLet (replaceBinds localDecls (decls1 ++ decls2')) expr))
 
@@ -3934,14 +3938,17 @@ adjustLayoutAfterRename oldPN newName t = do
            -- let off = (length $ showGhc newName) - (length $ showGhc oldPN)
 
            -- Offset calculation
-           -- * Must take into account the new position of the 'of'
+           -- - Must take into account the new position of the 'of'
            --   token.
-           -- * But must also take account of any spaces between the
+           -- - But must also take account of any spaces between the
            --   end of the 'of' token and the start of the MatchGroup.
-           -- * And of whether the 'of' token is on the same line as
+           -- - And of whether the 'of' token is on the same line as
            --   the MatchGroup
+           -- logm $ "adjustLHsExpr:case:starting="
+           -- drawTokenTreeDetailed "adjustLHsExpr:case"
            upToOf <- getLineToks l isOf
            let off = calcOffset upToOf
+           logm $ "adjustLHsExpr:case:(l,off)=" ++ showGhc (l,off)
 
            if off /= 0
              then do
@@ -3971,10 +3978,22 @@ adjustLayoutAfterRename oldPN newName t = do
           then do
             logm $ "adjustLHsExpr:let:(l,off)=" ++ showGhc (l,off)
             local' <- indentList (sortBy compareLocated $ hsBinds local) off
+            -- drawTokenTreeDetailed "adjustLHsExpr:let:after indentList"
             upToIn <- getLineToks l isIn
+            -- logm $ "adjustLHsExpr:in:(upToIn)=" ++ show upToIn
             let offIn = calcOffset upToIn
-            logm $ "adjustLHsExpr:in:(l,offIn)=" ++ showGhc (l,offIn)
-            expr' <- indentDeclAndToks expr offIn
+            logm $ "adjustLHsExpr:let/in:(l,offIn)=" ++ showGhc (l,offIn)
+            -- drawTokenTreeDetailed "before blowup"
+
+            -- Does the 'in' token fall on the same line as the let
+            -- decls?
+            let (GHC.L ll _) = glast "adjustLHSExpr" local'
+            lastDeclToks <- getToksForSpanNoInv ll
+            let offToUse = if startLineForToks upToIn == startLineForToks (reverse lastDeclToks)
+                             then off
+                             else offIn
+            expr' <- indentDeclAndToks expr offToUse
+            -- drawTokenTreeDetailed "adjustLHsExpr:let:after indentDeclAndToks"
             return (GHC.L l (GHC.HsLet (replaceBinds local local') expr'))
           else return x
 
@@ -3983,7 +4002,7 @@ adjustLayoutAfterRename oldPN newName t = do
     -- ---------------------------------
 
     adjustLMatch :: (GHC.LMatch GHC.Name) -> RefactGhc (GHC.LMatch GHC.Name)
-    adjustLMatch x@(GHC.L _ (GHC.Match _ _ (GHC.GRHSs _ GHC.EmptyLocalBinds))) = return x
+    adjustLMatch x@(GHC.L _ (GHC.Match _    _    (GHC.GRHSs _    GHC.EmptyLocalBinds))) = return x
     adjustLMatch x@(GHC.L l (GHC.Match pats mtyp (GHC.GRHSs grhs local))) =
       do
         upToWhere <- getLineToks l isWhere
@@ -4003,6 +4022,11 @@ adjustLayoutAfterRename oldPN newName t = do
 
 -- -------------------------------------
 
+startLineForToks :: [PosToken] -> Int
+startLineForToks toks = tokenRow $ ghead "startLineForToks" toks
+
+-- -------------------------------------
+
 compareLocated ::
   Ord a => GHC.GenLocated a t -> GHC.GenLocated a t1 -> Ordering
 compareLocated (GHC.L l1 _) (GHC.L l2 _) = compare l1 l2
@@ -4015,20 +4039,20 @@ getLineToks l isToken = do
   toks <- getToksForSpanNoInv l
   toksBefore <- getToksBeforeSpan l
 
-  logm $ "getLineToks:toks=" ++ show toks
-  logm $ "getLineToks:toksBefore=" ++ show toksBefore
+  -- logm $ "getLineToks:toks=" ++ show toks
+  -- logm $ "getLineToks:toksBefore=" ++ show toksBefore
 
   let lineToks = groupTokensByLine $ reverse toks ++ (reversedToks toksBefore)
 
   logm $ "getLineToks:lineToks=" ++ show lineToks
 
-  let ofLine = ghead "getLineToks.1" $ filter (\ll -> any isToken ll) lineToks
+  let forLine = ghead "getLineToks.1" $ filter (\ll -> any isToken ll) lineToks
 
-  logm $ "getLineToks:ofLine=" ++ show ofLine
+  -- logm $ "getLineToks:forLine=" ++ show forLine
 
   -- let upToOf = reverse $ dropWhile (\tok -> not (isToken tok)) fullOfLineRev
-  let upToOf = reverse $ dropWhile (\tok -> not (isToken tok)) ofLine
-  logm $ "getLineToks:upToOf=" ++ show upToOf
+  let upToOf = reverse $ dropWhile (\tok -> not (isToken tok)) forLine
+  logm $ "getLineToks:up to match=" ++ show upToOf
   return upToOf
 
 -- -------------------------------------

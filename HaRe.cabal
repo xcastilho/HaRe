@@ -1,5 +1,5 @@
 Name:                           HaRe
-Version:                        0.7.0.5
+Version:                        0.7.0.6
 Author:                         Chris Brown, Huiqing Li, Simon Thompson, Alan Zimmerman
 Maintainer:                     Alan Zimmerman
 Stability:                      Alpha
@@ -22,7 +22,7 @@ Description:
    .
    Current known defects:
    .
-     * After renaming, the layout of surrounding 'let' clause is not adjusted.
+     * After renaming, the layout of nested let/where clauses is not adjusted.
        This can cause problems if the new name is a different length from the
        old one.
    .
@@ -55,7 +55,7 @@ Library
                                 , ghc-paths
                                 , ghc-prim
                                 , ghc-syb-utils
-                                , ghc-mod == 3.0.2
+                                , ghc-mod >= 3.1.2
                                 , mtl
                                 , old-time
                                 , pretty
@@ -113,7 +113,7 @@ Executable ghc-hare
                                 , ghc-paths
                                 , ghc-prim
                                 , ghc-syb-utils
-                                , ghc-mod == 3.0.2
+                                , ghc-mod >= 3.1.2
                                 , mtl
                                 , old-time
                                 , parsec
@@ -147,7 +147,8 @@ test-suite spec
     test
   build-depends:
       base        >= 4.0  && < 4.7
-    , Diff == 0.1.3
+    -- , Diff == 0.1.3
+    , Diff        >= 0.3.0
     , HUnit       == 1.2.*
     , QuickCheck  >= 2.5
     , containers
@@ -158,8 +159,8 @@ test-suite spec
     , ghc-paths   == 0.1.*
     , ghc-prim
     , ghc-syb-utils
-    , ghc-mod == 3.0.2
-    , hspec       == 1.4.*
+    , ghc-mod >= 3.1.2
+    , hspec   >= 1.5.0
     , mtl
     , old-time
     , process

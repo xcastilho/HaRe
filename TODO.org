@@ -1,15 +1,24 @@
 * HaRe todo
+** TODO splitSubToks does not take cognizance of leading/trailing comments
 ** TODO renaming with length change does not adjust surrounding layout for do/let/where/of etc
     - 'of' complete
     - 'do' complete
+** TODO rename tid to tidlong in MissingH-1.2.0.2/src/Data/Progress/Meter.hs (164,16) does not fix layout after the do
 ** TODO rename mod to parsed complains of existing variable named parsed.
      - This is not the case. Line 36 col 10
    [2013-09-10 Tue]
    [[file:~/mysrc/github/alanz/HaRe/test/UtilsSpec.hs::let%20mod%20%3D%20GHC.pm_parsed_source%20$%20GHC.tm_parsed_module%20t][file:~/mysrc/github/alanz/HaRe/test/UtilsSpec.hs::let mod = GHC.pm_parsed_source $ GHC.tm_parsed_module t]]
 ** TODO The elisp test for buffers to save includes directories that have been modified
 ** TODO check cabal support
-     - It does not seem to pick up the main files. Need to see how to
-       set those.
+     - [x] It does not seem to pick up the main files. Need to see how to
+         set those.
+     - [x] pull request for ghc-mod to return those
+     - [ ] should possibly make a setting to include targets from
+       test/benchmark categories
+     - [x] Need to manage current directory in terms of cabal.
+     - [ ] Cannot load multiple main modules. Consider generating the
+       union of all targets excluding the main modules, and putting
+       those in the setTargets list.
 ** TODO liftToTopLevel in syz Zipper of g from zmapQ introduces param errors
       zmapQ f z = reverse $ downQ [] g z where
            g z' = query f z' : leftQ [] g z'

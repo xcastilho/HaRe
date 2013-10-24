@@ -12,13 +12,9 @@ module Language.Haskell.Refact.MoveDef
 import qualified Data.Generics as SYB
 import qualified GHC.SYB.Utils as SYB
 
--- import qualified Bag                   as GHC
 import qualified Exception             as GHC
-import qualified FastString            as GHC
 import qualified GHC
 import qualified Name                  as GHC
--- import qualified OccName               as GHC
--- import qualified Outputable            as GHC
 
 import Control.Exception
 import Control.Monad.State
@@ -92,7 +88,7 @@ compLiftToTopLevel fileName (row,col) = do
       parsed  <- getRefactParsed
 
       let (Just (modName,_)) = getModuleName parsed
-      let maybePn = locToName (GHC.mkFastString fileName) (row, col) renamed
+      let maybePn = locToName (row, col) renamed
       case maybePn of
         Just pn ->  do
             liftToTopLevel' modName pn
@@ -118,7 +114,7 @@ compLiftOneLevel fileName (row,col) = do
       logm $ "compLiftOneLevel:renamed=" ++ (SYB.showData SYB.Renamer 0 renamed) -- ++AZ++
 
       let (Just (modName,_)) = getModuleName parsed
-      let maybePn = locToName (GHC.mkFastString fileName) (row, col) renamed
+      let maybePn = locToName (row, col) renamed
       case maybePn of
         Just pn ->  do
             rs <- liftOneLevel' modName pn
@@ -147,7 +143,7 @@ compDemote fileName (row,col) = do
       parsed  <- getRefactParsed
 
       let (Just (modName,_)) = getModuleName parsed
-      let maybePn = locToName (GHC.mkFastString fileName) (row, col) renamed
+      let maybePn = locToName (row, col) renamed
       case maybePn of
         Just pn -> do
           demote' modName pn
@@ -324,15 +320,18 @@ moveDecl1 t defName ns sigNames topLevel
         -- drawTokenTree "before getting toks" -- ++AZ++
         funToks <- getToksForSpan sspan
         logm $ "moveDecl1:funToks=" ++ (showToks funToks)
-        drawTokenTree "moveDecl1:after getting toks" -- ++AZ++
+        drawTokenTree "moveDecl1:after getting toks" -- ++AZ++ 'in' present
+        --- drawTokenTreeDetailed "moveDecl1:after getting toks" -- ++AZ++
 
         -- (t'',sigsRemoved) <- rmTypeSigs ns t
         (t'',sigsRemoved) <- rmTypeSigs sigNames t
-        drawTokenTree "moveDecl1:after rmTypeSigs" -- ++AZ++
+        -- drawTokenTree "moveDecl1:after rmTypeSigs" -- ++AZ++
+        drawTokenTreeDetailed "moveDecl1:after rmTypeSigs" -- ++AZ++
         -- logm $ "moveDecl1:t''=" ++ (SYB.showData SYB.Renamer 0 t'') -- ++AZ++
         (t',_declRemoved,_sigRemoved)  <- rmDecl (ghead "moveDecl3.1"  ns) False t''
         -- logm $ "moveDecl1:t'=" ++ (SYB.showData SYB.Renamer 0 t') -- ++AZ++
-        drawTokenTree "moveDecl1:after rmDecl" -- ++AZ++
+        -- drawTokenTree "moveDecl1:after rmDecl" -- ++AZ++
+        drawTokenTreeDetailed "moveDecl1:after rmDecl" -- ++AZ++  'in' missing
 
         let getToksForMaybeSig (GHC.L ss _) =
                              do
@@ -401,6 +400,7 @@ addParamsToParent _pn [] t = return t
 addParamsToParent  pn params t = do
   logm $ "addParamsToParent:(pn,params)" ++ (showGhc (pn,params))
   t' <- addActualParamsToRhs True pn params t
+  -- drawTokenTreeDetailed "addParamsToParent done"
   return t'
 
 

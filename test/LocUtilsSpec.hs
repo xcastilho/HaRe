@@ -4,20 +4,11 @@ import           Test.Hspec
 
 import           TestUtils
 
--- import qualified Bag        as GHC
--- import qualified Digraph    as GHC
 import qualified FastString as GHC
 import qualified GHC        as GHC
 import qualified GhcMonad   as GHC
 import qualified Lexer      as GHC
--- import qualified Name       as GHC
--- import qualified Outputable as GHC
--- import qualified RdrName    as GHC
 import qualified SrcLoc     as GHC
-
--- import qualified Data.Generics.Schemes as SYB
--- import qualified Data.Generics.Aliases as SYB
--- import qualified GHC.SYB.Utils         as SYB
 
 import Control.Monad.State
 import Data.Maybe
@@ -89,7 +80,7 @@ spec = do
 
       let declsr = hsBinds renamed
 
-      let Just (GHC.L _ sq) = locToName whereIn3FileName (14, 1) renamed
+      let Just (GHC.L _ sq) = locToName (14, 1) renamed
       let (Just sqSig, _sigToks) =
             case (getSigAndToks sq renamed toks) of
               Just (sig, sigToks) -> (Just sig, sigToks)
@@ -141,7 +132,7 @@ spec = do
 
       let declsr = hsBinds renamed
 
-      let Just (GHC.L _ _sq) = locToName tokenTestFileName (19, 1) renamed
+      let Just (GHC.L _ _sq) = locToName (19, 1) renamed
 
       let decls = filter isFunOrPatBindR declsr
 
@@ -151,7 +142,7 @@ spec = do
       -- (showGhc decls) `shouldBe` ""
       (showGhc decl) `shouldBe` "TokenTest.foo x y\n  = do { c <- System.IO.getChar;\n         GHC.Base.return c }"
 
-      (showToks $ getToks ((14,1),(26,1)) toks) `shouldBe` 
+      (showToks $ getToks ((14,1),(26,1)) toks) `shouldBe`
              ("[(((14,3),(14,6)),ITlet,\"let\"),"++
              "(((14,7),(14,7)),ITvocurly,\"\"),"++
              "(((14,7),(14,10)),ITvarid \"bar\",\"bar\"),"++
@@ -183,6 +174,50 @@ spec = do
 
       (show $ getStartEndLoc decl) `shouldBe` "((19,1),(21,14))"
       (show   (startPos,endPos)) `shouldBe` "((18,1),(21,14))"
+
+    -- -----------------------------------------------------------------
+
+    it "get start&end loc, including leading comments which belong 3" $ do
+      (t, toks) <- parsedFileTokenTestGhc
+      let renamed = fromJust $ GHC.tm_renamed_source t
+
+      let Just expr = locToExp (15,8) (15,18) renamed :: Maybe (GHC.Located (GHC.HsExpr GHC.Name))
+
+      let (startPos,endPos) = startEndLocIncComments toks expr
+
+      (showGhc expr) `shouldBe` "b GHC.Num.+ bar"
+
+      (showToks $ getToks ((14,1),(26,1)) toks) `shouldBe`
+             ("[(((14,3),(14,6)),ITlet,\"let\"),"++
+             "(((14,7),(14,7)),ITvocurly,\"\"),"++
+             "(((14,7),(14,10)),ITvarid \"bar\",\"bar\"),"++
+             "(((14,11),(14,12)),ITequal,\"=\"),"++
+             "(((14,13),(14,14)),ITinteger 3,\"3\"),"++
+             "(((15,3),(15,3)),ITvccurly,\"\"),"++
+             "(((15,3),(15,5)),ITin,\"in\"),"++
+             "(((15,10),(15,11)),ITvarid \"b\",\"b\"),"++
+             "(((15,12),(15,13)),ITvarsym \"+\",\"+\"),"++
+             "(((15,14),(15,17)),ITvarid \"bar\",\"bar\"),"++
+             "(((15,18),(15,38)),ITlineComment \"-- ^trailing comment\",\"-- ^trailing comment\"),"++
+             "(((18,1),(18,19)),ITlineComment \"-- leading comment\",\"-- leading comment\"),"++
+             "(((19,1),(19,1)),ITsemi,\"\"),"++
+             "(((19,1),(19,4)),ITvarid \"foo\",\"foo\"),"++
+             "(((19,5),(19,6)),ITvarid \"x\",\"x\"),"++
+             "(((19,7),(19,8)),ITvarid \"y\",\"y\"),"++
+             "(((19,9),(19,10)),ITequal,\"=\"),"++
+             "(((20,3),(20,5)),ITdo,\"do\"),"++
+             "(((20,6),(20,6)),ITvocurly,\"\"),"++
+             "(((20,6),(20,7)),ITvarid \"c\",\"c\"),"++
+             "(((20,8),(20,10)),ITlarrow,\"<-\"),"++
+             "(((20,11),(20,18)),ITvarid \"getChar\",\"getChar\"),"++
+             "(((21,6),(21,6)),ITsemi,\"\"),"++
+             "(((21,6),(21,12)),ITvarid \"return\",\"return\"),"++
+             "(((21,13),(21,14)),ITvarid \"c\",\"c\"),"++
+             "(((26,1),(26,1)),ITvccurly,\"\"),"++
+             "(((26,1),(26,1)),ITsemi,\"\")]")
+
+      (show $ getStartEndLoc expr) `shouldBe` "((15,10),(15,17))"
+      (show   (startPos,endPos)) `shouldBe` "((15,3),(15,38))"
 
     -- ---------------------------------
 

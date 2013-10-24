@@ -10,10 +10,14 @@ import qualified Digraph    as GHC
 import qualified FastString as GHC
 import qualified GHC        as GHC
 import qualified GhcMonad   as GHC
+import qualified HscTypes   as GHC
 
+import Control.Exception
 import Control.Monad.State
 import Data.Algorithm.Diff
 import Data.Maybe
+import Language.Haskell.GhcMod
+import Language.Haskell.Refact.Renaming
 import Language.Haskell.Refact.Utils
 import Language.Haskell.Refact.Utils.GhcBugWorkArounds
 import Language.Haskell.Refact.Utils.GhcVersionSpecific
@@ -22,12 +26,12 @@ import Language.Haskell.Refact.Utils.Monad
 import Language.Haskell.Refact.Utils.MonadFunctions
 import Language.Haskell.Refact.Utils.TypeSyn
 import Language.Haskell.Refact.Utils.TypeUtils
+import System.Directory
 
 -- ---------------------------------------------------------------------
 
 main :: IO ()
 main = do
-  -- setLogger
   hspec spec
 
 spec :: Spec
@@ -85,7 +89,62 @@ spec = do
 #endif
       origStr <- readFile "./test/testdata/BCpp.hs"
       let toksStr = (GHC.showRichTokenStream $ bypassGHCBug7351 toks)
-      (show (filter (\(c,_) -> c /= B) $ getGroupedDiff (lines toksStr) (lines origStr))) `shouldBe` "[]"
+      -- (show (filter (\(c,_) -> c /= B) $ getGroupedDiff (lines toksStr) (lines origStr))) `shouldBe` "[]"
+      (show $ compareStrings toksStr origStr) `shouldBe` "[]"
+
+  -- -----------------------------------
+
+    it "loads a series of files based on cabal1" $ do
+
+      currentDir <- getCurrentDirectory
+      -- currentDir `shouldBe` "/home/alanz/mysrc/github/alanz/HaRe"
+      setCurrentDirectory "./test/testdata/cabal/cabal1"
+      -- d <- getCurrentDirectory
+      -- d `shouldBe` "/home/alanz/mysrc/github/alanz/HaRe/test/testdata/cabal/cabal1"
+      cradle <- findCradle
+      -- (show cradle) `shouldBe` ""
+
+      let settings = defaultSettings { rsetEnabledTargets = (True,True,False,False) }
+
+      r <- rename settings cradle "./src/Foo/Bar.hs" "baz1" (3, 1)
+      -- r <- rename logTestSettings cradle "./src/Foo/Bar.hs" "baz1" (3, 1)
+      setCurrentDirectory currentDir
+
+      r' <- mapM makeRelativeToCurrentDirectory r
+
+      (show r') `shouldBe` "[\"test/testdata/cabal/cabal1/src/Foo/Bar.hs\",\"src/main.hs\"]"
+
+
+  -- -----------------------------------
+
+    it "loads a series of files based on cabal2" $ do
+
+      currentDir <- getCurrentDirectory
+      -- currentDir `shouldBe` "/home/alanz/mysrc/github/alanz/HaRe"
+      setCurrentDirectory "./test/testdata/cabal/cabal2"
+      -- d <- getCurrentDirectory
+      -- d `shouldBe` "/home/alanz/mysrc/github/alanz/HaRe/test/testdata/cabal/cabal1"
+      cradle <- findCradle
+      -- (show cradle) `shouldBe` ""
+
+      let settings = defaultSettings { rsetEnabledTargets = (True,True,False,False) }
+
+      let handler = [Handler handler1]
+          handler1 :: GHC.SourceError -> IO [String]
+          handler1 _e = do
+             setCurrentDirectory currentDir
+             return []
+
+      r <- catches (rename settings cradle "./src/Foo/Bar.hs" "baz1" (3, 1)) handler
+      -- r <- rename settings cradle "./src/Foo/Bar.hs" "baz1" (3, 1)
+      -- r <- rename logTestSettings cradle "./src/Foo/Bar.hs" "baz1" (3, 1)
+      setCurrentDirectory currentDir
+
+      r' <- mapM makeRelativeToCurrentDirectory r
+
+      pending -- "complete this"
+      -- (show r') `shouldBe` "[\"test/testdata/cabal/cabal2/src/Foo/Bar.hs\",\"src/main.hs\"]"
+
 
   -- -------------------------------------------------------------------
 
